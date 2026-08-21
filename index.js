@@ -12,7 +12,6 @@ app.get('/', (req, res) => {
     res.send('<h1>Guerra de Reinos</h1><p>El servidor del continente esta activo.</p>');
 });
 
-// Ruta para ver el mapa y quien lo posee
 app.get('/mapa', async (req, res) => {
     const session = driver.session();
     try {
@@ -21,13 +20,11 @@ app.get('/mapa', async (req, res) => {
             OPTIONAL MATCH (j:Jugador)-[:POSEE]->(t)
             RETURN t.nombre AS nombre, j.nombre AS jugador
         `);
-        
         const territorios = result.records.map(record => {
             const nombre = record.get('nombre');
             const jugador = record.get('jugador');
             return jugador ? `${nombre} (Ocupado por ${jugador})` : `${nombre} (Vacio)`;
         });
-
         if (territorios.length === 0) {
             res.send('<h1>Mapa de Aethel</h1><p>El mapa esta vacio. Visita /generar-mapa para crear territorios.</p>');
         } else {
@@ -41,16 +38,12 @@ app.get('/mapa', async (req, res) => {
     }
 });
 
-// Ruta para generar el mapa de prueba
 app.get('/generar-mapa', async (req, res) => {
     const session = driver.session();
     try {
         await session.run('MATCH (n) DETACH DELETE n');
         for (let i = 1; i <= 5; i++) {
-            await session.run('CREATE (t:Territorio {id: $id, nombre: $nombre, ocupado: false})', { 
-                id: i, 
-                nombre: `Territorio ${i}` 
-            });
+            await session.run('CREATE (t:Territorio {id: $id, nombre: $nombre, ocupado: false})', { id: i, nombre: `Territorio ${i}` });
         }
         for (let i = 1; i < 5; i++) {
             await session.run(`
@@ -68,38 +61,23 @@ app.get('/generar-mapa', async (req, res) => {
     }
 });
 
-// Ruta de Registro
 app.get('/registrar/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
-        const result = await session.run(`
-            MATCH (t:Territorio {ocupado: false}) 
-            RETURN t.nombre AS nombre 
-            ORDER BY rand() 
-            LIMIT 1
-        `);
-        
-        if (result.records.length === 0) {
-            return res.send('No hay territorios vacios para colonizar.');
-        }
-
+        const result = await session.run(`MATCH (t:Territorio {ocupado: false}) RETURN t.nombre AS nombre ORDER BY rand() LIMIT 1`);
+        if (result.records.length === 0) return res.send('No hay territorios vacios para colonizar.');
         const territorioNombre = result.records[0].get('nombre');
-
         await session.run(`
             MATCH (t:Territorio {nombre: $nombre})
             CREATE (j:Jugador {nombre: $jugador})
             CREATE (j)-[:POSEE]->(t)
             SET t.ocupado = true, 
-                t.hierro = 500, 
-                t.madera = 500, 
-                t.oro = 200, 
-                t.alimento = 200,
-                t.nivel_mina_hierro = 0,
-                t.nivel_aserradero = 0
+                t.hierro = 500, t.madera = 500, t.oro = 200, t.alimento = 200,
+                t.nivel_mina_hierro = 0, t.nivel_aserradero = 0,
+                t.construccion_fin = null
         `, { nombre: territorioNombre, jugador: nombreJugador });
-
-        res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Has reclamado el ${territorioNombre}. Visita /panel/${nombreJugador}</p>`);
+        res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Visita /panel/${nombreJugador}</p>`);
     } catch (error) {
         console.error(error);
         res.status(500).send('Error al registrar jugador.');
@@ -108,15 +86,14 @@ app.get('/registrar/:nombre', async (req, res) => {
     }
 });
 
-// Ruta para Construir Mina de Hierro
+// Construir Mina de Hierro (Ahora inicia el temporizador)
 app.get('/construir/:nombre/mina-hierro', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
-        // 1. Obtenemos nivel actual y recursos
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
-            RETURN t.nivel_mina_hierro AS nivel, t.hierro AS hierro, t.madera AS madera
+            RETURN t.nivel_mina_hierro AS nivel, t.hierro AS hierro, t.madera AS madera, t.construccion_fin AS fin
         `, { nombre: nombreJugador });
 
         if (result.records.length === 0) return res.send('Jugador no encontrado.');
@@ -125,25 +102,33 @@ app.get('/construir/:nombre/mina-hierro', async (req, res) => {
         const nivelActual = data.get('nivel').toNumber();
         const hierroActual = data.get('hierro').toNumber();
         const maderaActual = data.get('madera').toNumber();
+        const construccionFin = data.get('fin'); // Esto es null si no hay nada construyéndose
 
-        // 2. Calculamos coste y OBLIGAMOS a que sea entero con Math.floor
+        // Si ya hay algo en construcción, no dejamos construir otra cosa
+        if (construccionFin !== null) {
+            return res.send(`Ya hay un edificio en construccion. Espera a que termine. <a href="/panel/${nombreJugador}">Volver</a>`);
+        }
+
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelActual));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelActual));
 
-        // 3. Comprobamos si puede pagar
         if (hierroActual < costeHierro || maderaActual < costeMadera) {
-            return res.send(`Recursos insuficientes. Necesitas ${costeHierro} Hierro y ${costeMadera} Madera. <a href="/panel/${nombreJugador}">Volver</a>`);
+            return res.send(`Recursos insuficientes. <a href="/panel/${nombreJugador}">Volver</a>`);
         }
 
-        // 4. Restamos recursos y subimos nivel. Usamos toInteger en Cypher por seguridad
+        // Calculamos el tiempo de finalización (30 segundos por nivel)
+        const tiempoConstruccionMs = (30 + (nivelActual * 30)) * 1000; 
+        const tiempoFin = Date.now() + tiempoConstruccionMs;
+
+        // Restamos recursos y guardamos la hora de finalización
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             SET t.hierro = toInteger(t.hierro - $costeH), 
                 t.madera = toInteger(t.madera - $costeM), 
-                t.nivel_mina_hierro = toInteger(t.nivel_mina_hierro + 1)
-        `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera });
+                t.construccion_fin = $tiempoFin
+        `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera, tiempoFin: tiempoFin });
 
-        res.send(`<h1>Construccion exitosa!</h1><p>Mina de Hierro ahora es nivel ${nivelActual + 1}.</p><a href="/panel/${nombreJugador}">Volver al panel</a>`);
+        res.send(`<h1>Construccion iniciada!</h1><p>Tardara ${ (30 + (nivelActual * 30)) } segundos.</p><a href="/panel/${nombreJugador}">Volver al panel</a>`);
     } catch (error) {
         console.error(error);
         res.status(500).send('Error al construir.');
@@ -152,24 +137,28 @@ app.get('/construir/:nombre/mina-hierro', async (req, res) => {
     }
 });
 
-// Ruta del Panel de Control
 app.get('/panel/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
+        // 1. Evaluación perezosa: ¿Alguna construcción terminó?
+        const ahora = Date.now();
+        await session.run(`
+            MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
+            WHERE t.construccion_fin IS NOT NULL AND t.construccion_fin <= $ahora
+            SET t.nivel_mina_hierro = t.nivel_mina_hierro + 1,
+                t.construccion_fin = null
+        `, { nombre: nombreJugador, ahora: ahora });
+
+        // 2. Obtenemos los datos actualizados
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
-            RETURN t.nombre AS territorio, 
-                   t.hierro AS hierro, 
-                   t.madera AS madera, 
-                   t.oro AS oro, 
-                   t.alimento AS alimento,
-                   t.nivel_mina_hierro AS nivel_mina
+            RETURN t.nombre AS territorio, t.hierro AS hierro, t.madera AS madera, 
+                   t.oro AS oro, t.alimento AS alimento,
+                   t.nivel_mina_hierro AS nivel_mina, t.construccion_fin AS fin
         `, { nombre: nombreJugador });
 
-        if (result.records.length === 0) {
-            return res.send('Jugador no encontrado.');
-        }
+        if (result.records.length === 0) return res.send('Jugador no encontrado.');
 
         const data = result.records[0];
         const nivelMina = data.get('nivel_mina').toNumber();
@@ -177,10 +166,41 @@ app.get('/panel/:nombre', async (req, res) => {
         const madera = data.get('madera').toNumber();
         const oro = data.get('oro').toNumber();
         const alimento = data.get('alimento').toNumber();
+        const construccionFin = data.get('fin') ? data.get('fin').toNumber() : null;
         
-        // Calculamos el coste de la proxima mejora
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelMina));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelMina));
+
+        // Generamos el HTML dependiendo de si está construyendo o no
+        let htmlEdificio = "";
+        if (construccionFin) {
+            const tiempoRestante = Math.max(0, Math.floor((construccionFin - ahora) / 1000));
+            htmlEdificio = `
+                <div class="edificio">
+                    <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
+                    <small>Construyendo... Tiempo restante: <span id="timer">${tiempoRestante}</span>s</small>
+                </div>
+                <script>
+                    let tiempo = document.getElementById('timer').innerText;
+                    setInterval(() => {
+                        tiempo--;
+                        if(tiempo <= 0) {
+                            window.location.reload(); // Recarga la página cuando llega a 0
+                        } else {
+                            document.getElementById('timer').innerText = tiempo;
+                        }
+                    }, 1000);
+                </script>
+            `;
+        } else {
+            htmlEdificio = `
+                <div class="edificio">
+                    <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
+                    <small>Coste de mejora: ${costeHierro} Hierro, ${costeMadera} Madera</small>
+                    <a href="/construir/${nombreJugador}/mina-hierro" class="btn">Mejorar</a>
+                </div>
+            `;
+        }
         
         res.send(`
             <!DOCTYPE html>
@@ -211,11 +231,7 @@ app.get('/panel/:nombre', async (req, res) => {
                     </div>
 
                     <h3>Edificios</h3>
-                    <div class="edificio">
-                        <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
-                        <small>Coste de mejora: ${costeHierro} Hierro, ${costeMadera} Madera</small>
-                        <a href="/construir/${nombreJugador}/mina-hierro" class="btn">Mejorar</a>
-                    </div>
+                    ${htmlEdificio}
                 </div>
             </body>
             </html>
