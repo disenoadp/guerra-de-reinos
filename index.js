@@ -120,10 +120,10 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
     try {
         await actualizarRecursos(session, nombreJugador);
 
-        // Obtenemos todos los niveles para evitar errores de sintaxis en Cypher
+        // Aquí estaba el error. Sin aliases para que coincida con nivelKey
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
-            RETURN t.nivel_mina_hierro AS nivel_mina, 
+            RETURN t.nivel_mina_hierro AS nivel_mina_hierro, 
                    t.nivel_aserradero AS nivel_aserradero, 
                    t.nivel_granja AS nivel_granja, 
                    t.hierro AS hierro, 
@@ -134,7 +134,6 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
         if (result.records.length === 0) return res.status(404).json({ error: 'Jugador no encontrado.' });
 
         const data = result.records[0];
-        // Elegimos el nivel correcto en JavaScript
         const nivelActual = toNum(data.get(nivelKey));
         const hierroActual = toNum(data.get('hierro'));
         const maderaActual = toNum(data.get('madera'));
