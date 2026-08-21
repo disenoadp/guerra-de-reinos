@@ -59,7 +59,7 @@ app.get('/generar-mapa', async (req, res) => {
                 CREATE (b)-[:FRONTERA]->(a)
             `, { a: i, b: i + 1 });
         }
-        res.send('Mapa generado con exito. Se crearon 5 territorios conectados.');
+        res.send('Mapa generado con exito.');
     } catch (error) {
         console.error(error);
         res.status(500).send('Error al generar el mapa.');
@@ -68,7 +68,7 @@ app.get('/generar-mapa', async (req, res) => {
     }
 });
 
-// Ruta de Registro con Asignacion Aleatoria y Recursos Iniciales
+// Ruta de Registro
 app.get('/registrar/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
@@ -86,7 +86,6 @@ app.get('/registrar/:nombre', async (req, res) => {
 
         const territorioNombre = result.records[0].get('nombre');
 
-        // Asignamos el territorio al jugador y le damos recursos iniciales
         await session.run(`
             MATCH (t:Territorio {nombre: $nombre})
             CREATE (j:Jugador {nombre: $jugador})
@@ -95,10 +94,12 @@ app.get('/registrar/:nombre', async (req, res) => {
                 t.hierro = 500, 
                 t.madera = 500, 
                 t.oro = 200, 
-                t.alimento = 200
+                t.alimento = 200,
+                t.nivel_mina_hierro = 0,
+                t.nivel_aserradero = 0
         `, { nombre: territorioNombre, jugador: nombreJugador });
 
-        res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Has reclamado el ${territorioNombre}. Tu imperio comienza. Visita /panel/${nombreJugador} para ver tus recursos.</p>`);
+        res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Has reclamado el ${territorioNombre}. Visita /panel/${nombreJugador}</p>`);
     } catch (error) {
         console.error(error);
         res.status(500).send('Error al registrar jugador.');
@@ -107,24 +108,76 @@ app.get('/registrar/:nombre', async (req, res) => {
     }
 });
 
-// NUEVA RUTA: Panel de Control del Jugador
+// NUEVA RUTA: Construir Mina de Hierro
+app.get('/construir/:nombre/mina-hierro', async (req, res) => {
+    const nombreJugador = req.params.nombre;
+    const session = driver.session();
+    try {
+        // 1. Obtenemos nivel actual y recursos
+        const result = await session.run(`
+            MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
+            RETURN t.nivel_mina_hierro AS nivel, t.hierro AS hierro, t.madera AS madera
+        `, { nombre: nombreJugador });
+
+        if (result.records.length === 0) return res.send('Jugador no encontrado.');
+
+        const data = result.records[0];
+        const nivelActual = data.get('nivel').toNumber();
+        const hierroActual = data.get('hierro').toNumber();
+        const maderaActual = data.get('madera').toNumber();
+
+        // 2. Calculamos coste (Nivel 1 cuesta 100h/50m, Nivel 2 cuesta 150h/75m, etc.)
+        const costeHierro = 100 * Math.pow(1.5, nivelActual);
+        const costeMadera = 50 * Math.pow(1.5, nivelActual);
+
+        // 3. Comprobamos si puede pagar
+        if (hierroActual < costeHierro || maderaActual < costeMadera) {
+            return res.send(`Recursos insuficientes. Necesitas ${Math.floor(costeHierro)} Hierro y ${Math.floor(costeMadera)} Madera. <a href="/panel/${nombreJugador}">Volver</a>`);
+        }
+
+        // 4. Restamos recursos y subimos nivel
+        await session.run(`
+            MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
+            SET t.hierro = t.hierro - $costeH, 
+                t.madera = t.madera - $costeM, 
+                t.nivel_mina_hierro = t.nivel_mina_hierro + 1
+        `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera });
+
+        res.send(`<h1>Construccion exitosa!</h1><p>Mina de Hierro ahora es nivel ${nivelActual + 1}.</p><a href="/panel/${nombreJugador}">Volver al panel</a>`);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Error al construir.');
+    } finally {
+        await session.close();
+    }
+});
+
+// Ruta del Panel de Control
 app.get('/panel/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
-        // Buscamos al jugador y los datos de su territorio
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
-            RETURN t.nombre AS territorio, t.hierro AS hierro, t.madera AS madera, t.oro AS oro, t.alimento AS alimento
+            RETURN t.nombre AS territorio, 
+                   t.hierro AS hierro, 
+                   t.madera AS madera, 
+                   t.oro AS oro, 
+                   t.alimento AS alimento,
+                   t.nivel_mina_hierro AS nivel_mina
         `, { nombre: nombreJugador });
 
         if (result.records.length === 0) {
-            return res.send('Jugador no encontrado. Asegurate de registrarte primero.');
+            return res.send('Jugador no encontrado.');
         }
 
         const data = result.records[0];
+        const nivelMina = data.get('nivel_mina').toNumber();
         
-        // Generamos una pagina web HTML sencilla para el panel
+        // Calculamos el coste de la proxima mejora para mostrarlo en el panel
+        const costeHierro = Math.floor(100 * Math.pow(1.5, nivelMina));
+        const costeMadera = Math.floor(50 * Math.pow(1.5, nivelMina));
+        
         res.send(`
             <!DOCTYPE html>
             <html lang="es">
@@ -133,9 +186,11 @@ app.get('/panel/:nombre', async (req, res) => {
                 <style>
                     body { font-family: Georgia, serif; background-color: #2c3e50; color: white; text-align: center; }
                     .panel { background-color: #34495e; width: 80%; margin: auto; padding: 20px; border-radius: 10px; margin-top: 50px; }
-                    .recursos { display: flex; justify-content: space-around; margin-top: 20px; }
+                    .recursos { display: flex; justify-content: space-around; margin-top: 20px; margin-bottom: 40px; }
                     .recurso { background: #2c3e50; padding: 15px; border-radius: 8px; width: 20%; }
                     .titulo { color: #f39c12; }
+                    .edificio { background: #2c3e50; padding: 15px; border-radius: 8px; margin-top: 10px; text-align: left; }
+                    .btn { background: #e67e22; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; float: right; }
                 </style>
             </head>
             <body>
@@ -149,6 +204,13 @@ app.get('/panel/:nombre', async (req, res) => {
                         <div class="recurso"><h3>Madera</h3><p>${data.get('madera')}</p></div>
                         <div class="recurso"><h3>Oro</h3><p>${data.get('oro')}</p></div>
                         <div class="recurso"><h3>Alimento</h3><p>${data.get('alimento')}</p></div>
+                    </div>
+
+                    <h3>Edificios</h3>
+                    <div class="edificio">
+                        <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
+                        <small>Coste de mejora: ${costeHierro} Hierro, ${costeMadera} Madera</small>
+                        <a href="/construir/${nombreJugador}/mina-hierro" class="btn">Mejorar</a>
                     </div>
                 </div>
             </body>
