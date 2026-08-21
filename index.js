@@ -108,7 +108,7 @@ app.get('/registrar/:nombre', async (req, res) => {
     }
 });
 
-// NUEVA RUTA: Construir Mina de Hierro
+// Ruta para Construir Mina de Hierro
 app.get('/construir/:nombre/mina-hierro', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
@@ -126,21 +126,21 @@ app.get('/construir/:nombre/mina-hierro', async (req, res) => {
         const hierroActual = data.get('hierro').toNumber();
         const maderaActual = data.get('madera').toNumber();
 
-        // 2. Calculamos coste (Nivel 1 cuesta 100h/50m, Nivel 2 cuesta 150h/75m, etc.)
-        const costeHierro = 100 * Math.pow(1.5, nivelActual);
-        const costeMadera = 50 * Math.pow(1.5, nivelActual);
+        // 2. Calculamos coste y OBLIGAMOS a que sea entero con Math.floor
+        const costeHierro = Math.floor(100 * Math.pow(1.5, nivelActual));
+        const costeMadera = Math.floor(50 * Math.pow(1.5, nivelActual));
 
         // 3. Comprobamos si puede pagar
         if (hierroActual < costeHierro || maderaActual < costeMadera) {
-            return res.send(`Recursos insuficientes. Necesitas ${Math.floor(costeHierro)} Hierro y ${Math.floor(costeMadera)} Madera. <a href="/panel/${nombreJugador}">Volver</a>`);
+            return res.send(`Recursos insuficientes. Necesitas ${costeHierro} Hierro y ${costeMadera} Madera. <a href="/panel/${nombreJugador}">Volver</a>`);
         }
 
-        // 4. Restamos recursos y subimos nivel
+        // 4. Restamos recursos y subimos nivel. Usamos toInteger en Cypher por seguridad
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
-            SET t.hierro = t.hierro - $costeH, 
-                t.madera = t.madera - $costeM, 
-                t.nivel_mina_hierro = t.nivel_mina_hierro + 1
+            SET t.hierro = toInteger(t.hierro - $costeH), 
+                t.madera = toInteger(t.madera - $costeM), 
+                t.nivel_mina_hierro = toInteger(t.nivel_mina_hierro + 1)
         `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera });
 
         res.send(`<h1>Construccion exitosa!</h1><p>Mina de Hierro ahora es nivel ${nivelActual + 1}.</p><a href="/panel/${nombreJugador}">Volver al panel</a>`);
@@ -173,8 +173,12 @@ app.get('/panel/:nombre', async (req, res) => {
 
         const data = result.records[0];
         const nivelMina = data.get('nivel_mina').toNumber();
+        const hierro = data.get('hierro').toNumber();
+        const madera = data.get('madera').toNumber();
+        const oro = data.get('oro').toNumber();
+        const alimento = data.get('alimento').toNumber();
         
-        // Calculamos el coste de la proxima mejora para mostrarlo en el panel
+        // Calculamos el coste de la proxima mejora
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelMina));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelMina));
         
@@ -200,10 +204,10 @@ app.get('/panel/:nombre', async (req, res) => {
                     <p>Territorio Actual: <b>${data.get('territorio')}</b></p>
                     
                     <div class="recursos">
-                        <div class="recurso"><h3>Hierro</h3><p>${data.get('hierro')}</p></div>
-                        <div class="recurso"><h3>Madera</h3><p>${data.get('madera')}</p></div>
-                        <div class="recurso"><h3>Oro</h3><p>${data.get('oro')}</p></div>
-                        <div class="recurso"><h3>Alimento</h3><p>${data.get('alimento')}</p></div>
+                        <div class="recurso"><h3>Hierro</h3><p>${hierro}</p></div>
+                        <div class="recurso"><h3>Madera</h3><p>${madera}</p></div>
+                        <div class="recurso"><h3>Oro</h3><p>${oro}</p></div>
+                        <div class="recurso"><h3>Alimento</h3><p>${alimento}</p></div>
                     </div>
 
                     <h3>Edificios</h3>
