@@ -12,17 +12,27 @@ app.get('/', (req, res) => {
     res.send('<h1>Guerra de Reinos</h1><p>El servidor del continente esta activo.</p>');
 });
 
-// Ruta para ver el mapa actual
+// Ruta para ver el mapa y quién lo posee
 app.get('/mapa', async (req, res) => {
     const session = driver.session();
     try {
-        const result = await session.run('MATCH (t:Territorio) RETURN t.nombre AS nombre');
-        const territorios = result.records.map(record => record.get('nombre'));
+        // Ahora buscamos los territorios y si tienen un jugador conectado
+        const result = await session.run(`
+            MATCH (t:Territorio)
+            OPTIONAL MATCH (j:Jugador)-[:POSEE]->(t)
+            RETURN t.nombre AS nombre, j.nombre AS jugador
+        `);
         
+        const territorios = result.records.map(record => {
+            const nombre = record.get('nombre');
+            const jugador = record.get('jugador');
+            return jugador ? `${nombre} (Ocupado por ${jugador})` : `${nombre} (Vacío)`;
+        });
+
         if (territorios.length === 0) {
             res.send('<h1>Mapa de Aethel</h1><p>El mapa esta vacio. Visita /generar-mapa para crear territorios.</p>');
         } else {
-            res.send(`<h1>Mapa de Aethel</h1><p>Territorios existentes:</p><ul>${territorios.map(t => `<li>${t}</li>`).join('')}</ul>`);
+            res.send(`<h1>Mapa de Aethel</h1><ul>${territorios.map(t => `<li>${t}</li>`).join('')}</ul>`);
         }
     } catch (error) {
         console.error(error);
@@ -32,22 +42,17 @@ app.get('/mapa', async (req, res) => {
     }
 });
 
-// Ruta para generar un mapa de prueba (5 territorios conectados)
+// Ruta para generar el mapa de prueba
 app.get('/generar-mapa', async (req, res) => {
     const session = driver.session();
     try {
-        // 1. Borramos el mapa anterior (para que no se duplique si visitas esto 2 veces)
         await session.run('MATCH (n) DETACH DELETE n');
-
-        // 2. Creamos 5 territorios
         for (let i = 1; i <= 5; i++) {
             await session.run('CREATE (t:Territorio {id: $id, nombre: $nombre, ocupado: false})', { 
                 id: i, 
                 nombre: `Territorio ${i}` 
             });
         }
-
-        // 3. Conectamos los territorios (1-2, 2-3, 3-4, 4-5) en ambas direcciones
         for (let i = 1; i < 5; i++) {
             await session.run(`
                 MATCH (a:Territorio {id: $a}), (b:Territorio {id: $b})
@@ -55,11 +60,42 @@ app.get('/generar-mapa', async (req, res) => {
                 CREATE (b)-[:FRONTERA]->(a)
             `, { a: i, b: i + 1 });
         }
-
         res.send('Mapa generado con exito. Se crearon 5 territorios conectados.');
     } catch (error) {
         console.error(error);
         res.status(500).send('Error al generar el mapa.');
+    } finally {
+        await session.close();
+    }
+});
+
+// NUEVA RUTA: Registro de jugador
+app.get('/registrar/:nombre', async (req, res) => {
+    const nombreJugador = req.params.nombre;
+    const session = driver.session();
+    try {
+        // 1. Buscamos el primer territorio vacío
+        const result = await session.run('MATCH (t:Territorio {ocupado: false}) RETURN t.id AS id, t.nombre AS nombre LIMIT 1');
+        
+        if (result.records.length === 0) {
+            return res.send('No hay territorios vacios para colonizar.');
+        }
+
+        const territorioId = result.records[0].get('id').toNumber();
+        const territorioNombre = result.records[0].get('nombre');
+
+        // 2. Creamos al jugador y le asignamos el territorio
+        await session.run(`
+            MATCH (t:Territorio {id: $id})
+            CREATE (j:Jugador {nombre: $nombre})
+            CREATE (j)-[:POSEE]->(t)
+            SET t.ocupado = true
+        `, { id: territorioId, nombre: nombreJugador });
+
+        res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Has reclamado el ${territorioNombre}. Tu imperio comienza.</p>`);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Error al registrar jugador.');
     } finally {
         await session.close();
     }
