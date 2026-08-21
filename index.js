@@ -8,10 +8,21 @@ const driver = neo4j.driver(
     neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)
 );
 
-// Función helper para leer números de Neo4j sin errores
 function toNum(val) {
     if (val === null || val === undefined) return null;
     return typeof val === 'number' ? val : val.toNumber();
+}
+
+// Función para actualizar recursos perezosamente
+async function actualizarRecursos(session, nombreJugador) {
+    const ahora = Date.now();
+    // Calculamos cuánto ha pasado desde la última vez y sumamos la producción
+    // Producción: Nivel * 1000 por hora (1000/3600 por segundo)
+    await session.run(`
+        MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
+        SET t.hierro = toInteger(t.hierro + (toFloat($ahora - t.ultima_visita)/1000.0) * (t.nivel_mina_hierro * 1000.0 / 3600.0)),
+            t.ultima_visita = $ahora
+    `, { nombre: nombreJugador, ahora: ahora });
 }
 
 app.get('/', (req, res) => {
@@ -22,8 +33,7 @@ app.get('/mapa', async (req, res) => {
     const session = driver.session();
     try {
         const result = await session.run(`
-            MATCH (t:Territorio)
-            OPTIONAL MATCH (j:Jugador)-[:POSEE]->(t)
+            MATCH (t:Territorio) OPTIONAL MATCH (j:Jugador)-[:POSEE]->(t)
             RETURN t.nombre AS nombre, j.nombre AS jugador
         `);
         const territorios = result.records.map(record => {
@@ -32,7 +42,7 @@ app.get('/mapa', async (req, res) => {
             return jugador ? `${nombre} (Ocupado por ${jugador})` : `${nombre} (Vacio)`;
         });
         if (territorios.length === 0) {
-            res.send('<h1>Mapa de Aethel</h1><p>El mapa esta vacio. Visita /generar-mapa para crear territorios.</p>');
+            res.send('<h1>Mapa de Aethel</h1><p>El mapa esta vacio. Visita /generar-mapa.</p>');
         } else {
             res.send(`<h1>Mapa de Aethel</h1><ul>${territorios.map(t => `<li>${t}</li>`).join('')}</ul>`);
         }
@@ -54,8 +64,7 @@ app.get('/generar-mapa', async (req, res) => {
         for (let i = 1; i < 5; i++) {
             await session.run(`
                 MATCH (a:Territorio {id: $a}), (b:Territorio {id: $b})
-                CREATE (a)-[:FRONTERA]->(b)
-                CREATE (b)-[:FRONTERA]->(a)
+                CREATE (a)-[:FRONTERA]->(b) CREATE (b)-[:FRONTERA]->(a)
             `, { a: i, b: i + 1 });
         }
         res.send('Mapa generado con exito.');
@@ -72,7 +81,7 @@ app.get('/registrar/:nombre', async (req, res) => {
     const session = driver.session();
     try {
         const result = await session.run(`MATCH (t:Territorio {ocupado: false}) RETURN t.nombre AS nombre ORDER BY rand() LIMIT 1`);
-        if (result.records.length === 0) return res.send('No hay territorios vacios para colonizar.');
+        if (result.records.length === 0) return res.send('No hay territorios vacios.');
         const territorioNombre = result.records[0].get('nombre');
         await session.run(`
             MATCH (t:Territorio {nombre: $nombre})
@@ -80,23 +89,26 @@ app.get('/registrar/:nombre', async (req, res) => {
             CREATE (j)-[:POSEE]->(t)
             SET t.ocupado = true, 
                 t.hierro = 500, t.madera = 500, t.oro = 200, t.alimento = 200,
-                t.nivel_mina_hierro = 0, t.nivel_aserradero = 0,
-                t.construccion_fin = null
-        `, { nombre: territorioNombre, jugador: nombreJugador });
+                t.nivel_mina_hierro = 0, 
+                t.construccion_fin = null,
+                t.ultima_visita = $ahora
+        `, { nombre: territorioNombre, jugador: nombreJugador, ahora: Date.now() });
         res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Visita /panel/${nombreJugador}</p>`);
     } catch (error) {
         console.error(error);
-        res.status(500).send('Error al registrar jugador.');
+        res.status(500).send('Error al registrar.');
     } finally {
         await session.close();
     }
 });
 
-// Construir Mina de Hierro (Ahora devuelve JSON para no recargar la pagina)
 app.get('/construir/:nombre/mina-hierro', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
+        // 1. Actualizamos recursos ANTES de comprobar si puede pagar
+        await actualizarRecursos(session, nombreJugador);
+
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             RETURN t.nivel_mina_hierro AS nivel, t.hierro AS hierro, t.madera AS madera, t.construccion_fin AS fin
@@ -110,9 +122,7 @@ app.get('/construir/:nombre/mina-hierro', async (req, res) => {
         const maderaActual = toNum(data.get('madera'));
         const construccionFin = data.get('fin'); 
 
-        if (construccionFin !== null) {
-            return res.status(400).json({ error: 'Ya hay un edificio en construccion.' });
-        }
+        if (construccionFin !== null) return res.status(400).json({ error: 'Ya hay un edificio en construccion.' });
 
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelActual));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelActual));
@@ -134,7 +144,7 @@ app.get('/construir/:nombre/mina-hierro', async (req, res) => {
         res.json({ success: true, tiempoFin: tiempoFin });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: 'Error interno al construir.' });
+        res.status(500).json({ error: 'Error interno.' });
     } finally {
         await session.close();
     }
@@ -144,14 +154,18 @@ app.get('/panel/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
+        // 1. Finaliza construcción si el tiempo pasó
         const ahora = Date.now();
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             WHERE t.construccion_fin IS NOT NULL AND t.construccion_fin <= $ahora
-            SET t.nivel_mina_hierro = t.nivel_mina_hierro + 1,
-                t.construccion_fin = null
+            SET t.nivel_mina_hierro = t.nivel_mina_hierro + 1, t.construccion_fin = null
         `, { nombre: nombreJugador, ahora: ahora });
 
+        // 2. Actualiza los recursos generados
+        await actualizarRecursos(session, nombreJugador);
+
+        // 3. Carga datos para mostrar
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             RETURN t.nombre AS territorio, t.hierro AS hierro, t.madera AS madera, 
@@ -171,13 +185,14 @@ app.get('/panel/:nombre', async (req, res) => {
         
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelMina));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelMina));
+        const produccionHora = nivelMina * 1000;
 
         let htmlEdificio = "";
         if (construccionFin) {
             const tiempoRestante = Math.max(0, Math.floor((construccionFin - ahora) / 1000));
             htmlEdificio = `
                 <div class="edificio">
-                    <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
+                    <b>Mina de Hierro (Nivel ${nivelMina})</b> - Prod: ${produccionHora}/h<br>
                     <small>Construyendo... Tiempo restante: <span id="timer">${tiempoRestante}</span>s</small>
                     <div id="timer-msg" style="margin-top: 10px;"></div>
                 </div>
@@ -186,7 +201,7 @@ app.get('/panel/:nombre', async (req, res) => {
                     setInterval(() => {
                         tiempo--;
                         if(tiempo <= 0) {
-                            document.getElementById('timer-msg').innerHTML = '<b style="color:lightgreen;">Construccion finalizada!</b> <a href="/panel/${nombreJugador}">Actualiza la pagina</a>';
+                            document.getElementById('timer-msg').innerHTML = '<b style="color:lightgreen;">Finalizada!</b> <a href="/panel/${nombreJugador}">Actualizar</a>';
                             document.getElementById('timer').style.display = 'none';
                         } else {
                             document.getElementById('timer').innerText = tiempo;
@@ -197,7 +212,7 @@ app.get('/panel/:nombre', async (req, res) => {
         } else {
             htmlEdificio = `
                 <div class="edificio">
-                    <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
+                    <b>Mina de Hierro (Nivel ${nivelMina})</b> - Prod: ${produccionHora}/h<br>
                     <small>Coste de mejora: ${costeHierro} Hierro, ${costeMadera} Madera</small>
                     <button onclick="mejorarMina()" class="btn">Mejorar</button>
                     <div id="msg" style="color: red; margin-top: 10px;"></div>
@@ -206,11 +221,8 @@ app.get('/panel/:nombre', async (req, res) => {
                     async function mejorarMina() {
                         const res = await fetch('/construir/${nombreJugador}/mina-hierro');
                         const data = await res.json();
-                        if (data.success) {
-                            location.reload(); // Recarga para mostrar el temporizador
-                        } else {
-                            document.getElementById('msg').innerText = data.error;
-                        }
+                        if (data.success) { location.reload(); } 
+                        else { document.getElementById('msg').innerText = data.error; }
                     }
                 </script>
             `;
