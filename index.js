@@ -91,6 +91,8 @@ app.get('/registrar/:nombre', async (req, res) => {
                 t.nivel_mina_hierro = 0, 
                 t.nivel_aserradero = 0,
                 t.nivel_granja = 0,
+                t.nivel_cuartel = 0,
+                t.tropas_hostigador = 0,
                 t.construccion_tipo = null,
                 t.construccion_fin = null,
                 t.ultima_visita = $ahora
@@ -104,6 +106,7 @@ app.get('/registrar/:nombre', async (req, res) => {
     }
 });
 
+// Ruta para Construir Edificios
 app.get('/construir/:nombre/:edificio', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const edificio = req.params.edificio;
@@ -112,7 +115,8 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
     const niveles = {
         'mina-hierro': 'nivel_mina_hierro',
         'aserradero': 'nivel_aserradero',
-        'granja': 'nivel_granja'
+        'granja': 'nivel_granja',
+        'cuartel': 'nivel_cuartel'
     };
     const nivelKey = niveles[edificio];
     if (!nivelKey) return res.status(400).json({ error: 'Edificio no valido.' });
@@ -120,12 +124,12 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
     try {
         await actualizarRecursos(session, nombreJugador);
 
-        // Aquí estaba el error. Sin aliases para que coincida con nivelKey
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             RETURN t.nivel_mina_hierro AS nivel_mina_hierro, 
                    t.nivel_aserradero AS nivel_aserradero, 
-                   t.nivel_granja AS nivel_granja, 
+                   t.nivel_granja AS nivel_granja,
+                   t.nivel_cuartel AS nivel_cuartel,
                    t.hierro AS hierro, 
                    t.madera AS madera, 
                    t.construccion_fin AS fin
@@ -139,13 +143,13 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
         const maderaActual = toNum(data.get('madera'));
         const construccionFin = data.get('fin'); 
 
-        if (construccionFin !== null) return res.status(400).json({ error: 'Ya hay un edificio en construccion en este territorio.' });
+        if (construccionFin !== null) return res.status(400).json({ error: 'Ya hay un edificio en construccion.' });
 
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelActual));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelActual));
 
         if (hierroActual < costeHierro || maderaActual < costeMadera) {
-            return res.status(400).json({ error: `Recursos insuficientes. Necesitas ${costeHierro} Hierro y ${costeMadera} Madera.` });
+            return res.status(400).json({ error: `Recursos insuficientes.` });
         }
 
         const tiempoConstruccionMs = (30 + (nivelActual * 30)) * 1000; 
@@ -159,7 +163,64 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
                 t.construccion_fin = $tiempoFin
         `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera, tiempoFin: tiempoFin, edificio: edificio });
 
-        res.json({ success: true, tiempoFin: tiempoFin });
+        res.json({ success: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error interno.' });
+    } finally {
+        await session.close();
+    }
+});
+
+// NUEVA RUTA: Entrenar Tropas
+app.get('/entrenar/:nombre/:tropa', async (req, res) => {
+    const nombreJugador = req.params.nombre;
+    const tropa = req.params.tropa;
+    const session = driver.session();
+
+    // Por ahora solo tenemos una tropa
+    if (tropa !== 'hostigador') return res.status(400).json({ error: 'Tropa no valida.' });
+
+    try {
+        await actualizarRecursos(session, nombreJugador);
+
+        const result = await session.run(`
+            MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
+            RETURN t.nivel_cuartel AS nivel_cuartel, t.hierro AS hierro, t.madera AS madera, t.oro AS oro, t.entrenando_fin AS fin
+        `, { nombre: nombreJugador });
+
+        if (result.records.length === 0) return res.status(404).json({ error: 'Jugador no encontrado.' });
+
+        const data = result.records[0];
+        const nivelCuartel = toNum(data.get('nivel_cuartel'));
+
+        if (nivelCuartel === 0) return res.status(400).json({ error: 'Necesitas un Cuartel primero.' });
+
+        const hierroActual = toNum(data.get('hierro'));
+        const maderaActual = toNum(data.get('madera'));
+        const oroActual = toNum(data.get('oro'));
+        const entrenandoFin = data.get('fin');
+
+        if (entrenandoFin !== null) return res.status(400).json({ error: 'Ya hay tropas entrenandose.' });
+
+        const costeHierro = 50, costeMadera = 20, costeOro = 10;
+        if (hierroActual < costeHierro || maderaActual < costeMadera || oroActual < costeOro) {
+            return res.status(400).json({ error: 'Recursos insuficientes.' });
+        }
+
+        const tiempoEntrenamientoMs = 15000; // 15 segundos
+        const tiempoFin = Date.now() + tiempoEntrenamientoMs;
+
+        await session.run(`
+            MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
+            SET t.hierro = toInteger(t.hierro - $costeH), 
+                t.madera = toInteger(t.madera - $costeM),
+                t.oro = toInteger(t.oro - $costeOro),
+                t.entrenando_tipo = $tropa,
+                t.entrenando_fin = $tiempoFin
+        `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera, costeOro: costeOro, tiempoFin: tiempoFin, tropa: tropa });
+
+        res.json({ success: true });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error interno.' });
@@ -169,8 +230,8 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
 });
 
 function generarHtmlEdificio(nombreJugador, edificio, nivelActual, estaConstruyendo, tipoConstruccion, construccionFin, ahora) {
-    const nombres = { 'mina-hierro': 'Mina de Hierro', 'aserradero': 'Aserradero', 'granja': 'Granja' };
-    const produccion = { 'mina-hierro': nivelActual * 1000, 'aserradero': nivelActual * 800, 'granja': nivelActual * 600 };
+    const nombres = { 'mina-hierro': 'Mina de Hierro', 'aserradero': 'Aserradero', 'granja': 'Granja', 'cuartel': 'Cuartel' };
+    const produccion = { 'mina-hierro': nivelActual * 1000, 'aserradero': nivelActual * 800, 'granja': nivelActual * 600, 'cuartel': '-' };
     
     const costeHierro = Math.floor(100 * Math.pow(1.5, nivelActual));
     const costeMadera = Math.floor(50 * Math.pow(1.5, nivelActual));
@@ -229,24 +290,40 @@ app.get('/panel/:nombre', async (req, res) => {
     try {
         const ahora = Date.now();
         
+        // 1. Finaliza construccion si el tiempo pasó
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             WHERE t.construccion_fin IS NOT NULL AND t.construccion_fin <= $ahora
             SET t.nivel_mina_hierro = CASE WHEN t.construccion_tipo = 'mina-hierro' THEN t.nivel_mina_hierro + 1 ELSE t.nivel_mina_hierro END,
                 t.nivel_aserradero = CASE WHEN t.construccion_tipo = 'aserradero' THEN t.nivel_aserradero + 1 ELSE t.nivel_aserradero END,
                 t.nivel_granja = CASE WHEN t.construccion_tipo = 'granja' THEN t.nivel_granja + 1 ELSE t.nivel_granja END,
+                t.nivel_cuartel = CASE WHEN t.construccion_tipo = 'cuartel' THEN t.nivel_cuartel + 1 ELSE t.nivel_cuartel END,
                 t.construccion_fin = null,
                 t.construccion_tipo = null
         `, { nombre: nombreJugador, ahora: ahora });
 
+        // 2. Finaliza entrenamiento si el tiempo pasó
+        await session.run(`
+            MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
+            WHERE t.entrenando_fin IS NOT NULL AND t.entrenando_fin <= $ahora
+            SET t.tropas_hostigador = t.tropas_hostigador + 1,
+                t.entrenando_fin = null,
+                t.entrenando_tipo = null
+        `, { nombre: nombreJugador, ahora: ahora });
+
+        // 3. Actualiza recursos
         await actualizarRecursos(session, nombreJugador);
 
+        // 4. Carga datos
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             RETURN t.nombre AS territorio, t.hierro AS hierro, t.madera AS madera, 
                    t.oro AS oro, t.alimento AS alimento,
-                   t.nivel_mina_hierro AS nivel_mina, t.nivel_aserradero AS nivel_aserradero, t.nivel_granja AS nivel_granja,
-                   t.construccion_fin AS fin, t.construccion_tipo AS tipo
+                   t.nivel_mina_hierro AS nivel_mina, t.nivel_aserradero AS nivel_aserradero, 
+                   t.nivel_granja AS nivel_granja, t.nivel_cuartel AS nivel_cuartel,
+                   t.tropas_hostigador AS tropas,
+                   t.construccion_fin AS fin_c, t.construccion_tipo AS tipo_c,
+                   t.entrenando_fin AS fin_e, t.entrenando_tipo AS tipo_e
         `, { nombre: nombreJugador });
 
         if (result.records.length === 0) return res.send('Jugador no encontrado.');
@@ -256,15 +333,68 @@ app.get('/panel/:nombre', async (req, res) => {
         const madera = toNum(data.get('madera'));
         const oro = toNum(data.get('oro'));
         const alimento = toNum(data.get('alimento'));
+        
         const nivelMina = toNum(data.get('nivel_mina'));
         const nivelAserradero = toNum(data.get('nivel_aserradero'));
         const nivelGranja = toNum(data.get('nivel_granja'));
-        const construccionFin = data.get('fin') ? toNum(data.get('fin')) : null;
-        const tipoConstruccion = data.get('tipo');
+        const nivelCuartel = toNum(data.get('nivel_cuartel'));
         
+        const tropas = toNum(data.get('tropas'));
+        
+        const construccionFin = data.get('fin_c') ? toNum(data.get('fin_c')) : null;
+        const tipoConstruccion = data.get('tipo_c');
+        const entrenandoFin = data.get('fin_e') ? toNum(data.get('fin_e')) : null;
+
         const htmlMina = generarHtmlEdificio(nombreJugador, 'mina-hierro', nivelMina, construccionFin !== null, tipoConstruccion, construccionFin, ahora);
         const htmlAserradero = generarHtmlEdificio(nombreJugador, 'aserradero', nivelAserradero, construccionFin !== null, tipoConstruccion, construccionFin, ahora);
         const htmlGranja = generarHtmlEdificio(nombreJugador, 'granja', nivelGranja, construccionFin !== null, tipoConstruccion, construccionFin, ahora);
+        const htmlCuartel = generarHtmlEdificio(nombreJugador, 'cuartel', nivelCuartel, construccionFin !== null, tipoConstruccion, construccionFin, ahora);
+
+        // HTML para entrenar tropas
+        let htmlTropas = "";
+        if (nivelCuartel > 0) {
+            if (entrenandoFin) {
+                const tiempoRestante = Math.max(0, Math.floor((entrenandoFin - ahora) / 1000));
+                htmlTropas = `
+                    <div class="edificio">
+                        <b>Entrenando Hostigador...</b><br>
+                        <small>Tiempo restante: <span id="timer-tropa">${tiempoRestante}</span>s</small>
+                        <div id="timer-msg-tropa" style="margin-top: 10px;"></div>
+                    </div>
+                    <script>
+                        let tiempoT = document.getElementById('timer-tropa').innerText;
+                        setInterval(() => {
+                            tiempoT--;
+                            if(tiempoT <= 0) {
+                                document.getElementById('timer-msg-tropa').innerHTML = '<b style="color:lightgreen;">Tropa lista!</b> <a href="/panel/${nombreJugador}">Actualizar</a>';
+                                document.getElementById('timer-tropa').style.display = 'none';
+                            } else {
+                                document.getElementById('timer-tropa').innerText = tiempoT;
+                            }
+                        }, 1000);
+                    </script>
+                `;
+            } else {
+                htmlTropas = `
+                    <div class="edificio">
+                        <b>Hostigadores</b> (Tienes: ${tropas})<br>
+                        <small>Coste: 50 Hierro, 20 Madera, 10 Oro (Tarda 15s)</small>
+                        <button onclick="entrenar('hostigador')" class="btn">Entrenar 1</button>
+                        <div id="msg-tropa" style="color: red; margin-top: 10px;"></div>
+                    </div>
+                    <script>
+                        async function entrenar(tropa) {
+                            const res = await fetch('/entrenar/${nombreJugador}/' + tropa);
+                            const data = await res.json();
+                            if (data.success) { location.reload(); } 
+                            else { document.getElementById('msg-tropa').innerText = data.error; }
+                        }
+                    </script>
+                `;
+            }
+        } else {
+            htmlTropas = `<div class="edificio"><b>Tropas</b><br><small>Construye un Cuartel para entrenar tropas.</small></div>`;
+        }
         
         res.send(`
             <!DOCTYPE html>
@@ -299,6 +429,10 @@ app.get('/panel/:nombre', async (req, res) => {
                     ${htmlMina}
                     ${htmlAserradero}
                     ${htmlGranja}
+                    ${htmlCuartel}
+                    
+                    <h3>Ejercito</h3>
+                    ${htmlTropas}
                 </div>
             </body>
             </html>
