@@ -8,6 +8,12 @@ const driver = neo4j.driver(
     neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)
 );
 
+// Función helper para leer números de Neo4j sin errores
+function toNum(val) {
+    if (val === null || val === undefined) return null;
+    return typeof val === 'number' ? val : val.toNumber();
+}
+
 app.get('/', (req, res) => {
     res.send('<h1>Guerra de Reinos</h1><p>El servidor del continente esta activo.</p>');
 });
@@ -86,7 +92,7 @@ app.get('/registrar/:nombre', async (req, res) => {
     }
 });
 
-// Construir Mina de Hierro (Ahora inicia el temporizador)
+// Construir Mina de Hierro (Ahora devuelve JSON para no recargar la pagina)
 app.get('/construir/:nombre/mina-hierro', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
@@ -96,31 +102,28 @@ app.get('/construir/:nombre/mina-hierro', async (req, res) => {
             RETURN t.nivel_mina_hierro AS nivel, t.hierro AS hierro, t.madera AS madera, t.construccion_fin AS fin
         `, { nombre: nombreJugador });
 
-        if (result.records.length === 0) return res.send('Jugador no encontrado.');
+        if (result.records.length === 0) return res.status(404).json({ error: 'Jugador no encontrado.' });
 
         const data = result.records[0];
-        const nivelActual = data.get('nivel').toNumber();
-        const hierroActual = data.get('hierro').toNumber();
-        const maderaActual = data.get('madera').toNumber();
-        const construccionFin = data.get('fin'); // Esto es null si no hay nada construyéndose
+        const nivelActual = toNum(data.get('nivel'));
+        const hierroActual = toNum(data.get('hierro'));
+        const maderaActual = toNum(data.get('madera'));
+        const construccionFin = data.get('fin'); 
 
-        // Si ya hay algo en construcción, no dejamos construir otra cosa
         if (construccionFin !== null) {
-            return res.send(`Ya hay un edificio en construccion. Espera a que termine. <a href="/panel/${nombreJugador}">Volver</a>`);
+            return res.status(400).json({ error: 'Ya hay un edificio en construccion.' });
         }
 
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelActual));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelActual));
 
         if (hierroActual < costeHierro || maderaActual < costeMadera) {
-            return res.send(`Recursos insuficientes. <a href="/panel/${nombreJugador}">Volver</a>`);
+            return res.status(400).json({ error: `Recursos insuficientes. Necesitas ${costeHierro} Hierro y ${costeMadera} Madera.` });
         }
 
-        // Calculamos el tiempo de finalización (30 segundos por nivel)
         const tiempoConstruccionMs = (30 + (nivelActual * 30)) * 1000; 
         const tiempoFin = Date.now() + tiempoConstruccionMs;
 
-        // Restamos recursos y guardamos la hora de finalización
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             SET t.hierro = toInteger(t.hierro - $costeH), 
@@ -128,10 +131,10 @@ app.get('/construir/:nombre/mina-hierro', async (req, res) => {
                 t.construccion_fin = $tiempoFin
         `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera, tiempoFin: tiempoFin });
 
-        res.send(`<h1>Construccion iniciada!</h1><p>Tardara ${ (30 + (nivelActual * 30)) } segundos.</p><a href="/panel/${nombreJugador}">Volver al panel</a>`);
+        res.json({ success: true, tiempoFin: tiempoFin });
     } catch (error) {
         console.error(error);
-        res.status(500).send('Error al construir.');
+        res.status(500).json({ error: 'Error interno al construir.' });
     } finally {
         await session.close();
     }
@@ -141,7 +144,6 @@ app.get('/panel/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
-        // 1. Evaluación perezosa: ¿Alguna construcción terminó?
         const ahora = Date.now();
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
@@ -150,7 +152,6 @@ app.get('/panel/:nombre', async (req, res) => {
                 t.construccion_fin = null
         `, { nombre: nombreJugador, ahora: ahora });
 
-        // 2. Obtenemos los datos actualizados
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             RETURN t.nombre AS territorio, t.hierro AS hierro, t.madera AS madera, 
@@ -161,17 +162,16 @@ app.get('/panel/:nombre', async (req, res) => {
         if (result.records.length === 0) return res.send('Jugador no encontrado.');
 
         const data = result.records[0];
-        const nivelMina = data.get('nivel_mina').toNumber();
-        const hierro = data.get('hierro').toNumber();
-        const madera = data.get('madera').toNumber();
-        const oro = data.get('oro').toNumber();
-        const alimento = data.get('alimento').toNumber();
-        const construccionFin = data.get('fin') ? data.get('fin').toNumber() : null;
+        const nivelMina = toNum(data.get('nivel_mina'));
+        const hierro = toNum(data.get('hierro'));
+        const madera = toNum(data.get('madera'));
+        const oro = toNum(data.get('oro'));
+        const alimento = toNum(data.get('alimento'));
+        const construccionFin = data.get('fin') ? toNum(data.get('fin')) : null;
         
         const costeHierro = Math.floor(100 * Math.pow(1.5, nivelMina));
         const costeMadera = Math.floor(50 * Math.pow(1.5, nivelMina));
 
-        // Generamos el HTML dependiendo de si está construyendo o no
         let htmlEdificio = "";
         if (construccionFin) {
             const tiempoRestante = Math.max(0, Math.floor((construccionFin - ahora) / 1000));
@@ -179,13 +179,15 @@ app.get('/panel/:nombre', async (req, res) => {
                 <div class="edificio">
                     <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
                     <small>Construyendo... Tiempo restante: <span id="timer">${tiempoRestante}</span>s</small>
+                    <div id="timer-msg" style="margin-top: 10px;"></div>
                 </div>
                 <script>
                     let tiempo = document.getElementById('timer').innerText;
                     setInterval(() => {
                         tiempo--;
                         if(tiempo <= 0) {
-                            window.location.reload(); // Recarga la página cuando llega a 0
+                            document.getElementById('timer-msg').innerHTML = '<b style="color:lightgreen;">Construccion finalizada!</b> <a href="/panel/${nombreJugador}">Actualiza la pagina</a>';
+                            document.getElementById('timer').style.display = 'none';
                         } else {
                             document.getElementById('timer').innerText = tiempo;
                         }
@@ -197,8 +199,20 @@ app.get('/panel/:nombre', async (req, res) => {
                 <div class="edificio">
                     <b>Mina de Hierro (Nivel ${nivelMina})</b><br>
                     <small>Coste de mejora: ${costeHierro} Hierro, ${costeMadera} Madera</small>
-                    <a href="/construir/${nombreJugador}/mina-hierro" class="btn">Mejorar</a>
+                    <button onclick="mejorarMina()" class="btn">Mejorar</button>
+                    <div id="msg" style="color: red; margin-top: 10px;"></div>
                 </div>
+                <script>
+                    async function mejorarMina() {
+                        const res = await fetch('/construir/${nombreJugador}/mina-hierro');
+                        const data = await res.json();
+                        if (data.success) {
+                            location.reload(); // Recarga para mostrar el temporizador
+                        } else {
+                            document.getElementById('msg').innerText = data.error;
+                        }
+                    }
+                </script>
             `;
         }
         
@@ -214,7 +228,8 @@ app.get('/panel/:nombre', async (req, res) => {
                     .recurso { background: #2c3e50; padding: 15px; border-radius: 8px; width: 20%; }
                     .titulo { color: #f39c12; }
                     .edificio { background: #2c3e50; padding: 15px; border-radius: 8px; margin-top: 10px; text-align: left; }
-                    .btn { background: #e67e22; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; float: right; }
+                    .btn { background: #e67e22; color: white; padding: 10px 20px; border: none; border-radius: 5px; float: right; cursor: pointer; }
+                    .btn:hover { background: #d35400; }
                 </style>
             </head>
             <body>
