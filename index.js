@@ -16,7 +16,6 @@ app.get('/', (req, res) => {
 app.get('/mapa', async (req, res) => {
     const session = driver.session();
     try {
-        // Ahora buscamos los territorios y si tienen un jugador conectado
         const result = await session.run(`
             MATCH (t:Territorio)
             OPTIONAL MATCH (j:Jugador)-[:POSEE]->(t)
@@ -69,30 +68,34 @@ app.get('/generar-mapa', async (req, res) => {
     }
 });
 
-// NUEVA RUTA: Registro de jugador
+// Ruta de Registro con Asignación Aleatoria
 app.get('/registrar/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
-        // 1. Buscamos el primer territorio vacío
-        const result = await session.run('MATCH (t:Territorio {ocupado: false}) RETURN t.id AS id, t.nombre AS nombre LIMIT 1');
+        // 1. Buscamos un territorio vacío de forma aleatoria usando 'rand()'
+        const result = await session.run(`
+            MATCH (t:Territorio {ocupado: false}) 
+            RETURN t.nombre AS nombre 
+            ORDER BY rand() 
+            LIMIT 1
+        `);
         
         if (result.records.length === 0) {
             return res.send('No hay territorios vacios para colonizar.');
         }
 
-        const territorioId = result.records[0].get('id').toNumber();
         const territorioNombre = result.records[0].get('nombre');
 
-        // 2. Creamos al jugador y le asignamos el territorio
+        // 2. Creamos al jugador y le asignamos el territorio aleatorio
         await session.run(`
-            MATCH (t:Territorio {id: $id})
-            CREATE (j:Jugador {nombre: $nombre})
+            MATCH (t:Territorio {nombre: $nombre})
+            CREATE (j:Jugador {nombre: $jugador})
             CREATE (j)-[:POSEE]->(t)
             SET t.ocupado = true
-        `, { id: territorioId, nombre: nombreJugador });
+        `, { nombre: territorioNombre, jugador: nombreJugador });
 
-        res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Has reclamado el ${territorioNombre}. Tu imperio comienza.</p>`);
+        res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Has reclamado el ${territorioNombre} de forma aleatoria. Tu imperio comienza.</p>`);
     } catch (error) {
         console.error(error);
         res.status(500).send('Error al registrar jugador.');
