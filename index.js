@@ -13,7 +13,6 @@ function toNum(val) {
     return typeof val === 'number' ? val : val.toNumber();
 }
 
-// Función para actualizar recursos perezosamente
 async function actualizarRecursos(session, nombreJugador) {
     const ahora = Date.now();
     await session.run(`
@@ -105,7 +104,6 @@ app.get('/registrar/:nombre', async (req, res) => {
     }
 });
 
-// Ruta genérica para construir cualquier edificio
 app.get('/construir/:nombre/:edificio', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const edificio = req.params.edificio;
@@ -122,15 +120,22 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
     try {
         await actualizarRecursos(session, nombreJugador);
 
+        // Obtenemos todos los niveles para evitar errores de sintaxis en Cypher
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
-            RETURN t[${nivelKey}] AS nivel, t.hierro AS hierro, t.madera AS madera, t.construccion_fin AS fin
+            RETURN t.nivel_mina_hierro AS nivel_mina, 
+                   t.nivel_aserradero AS nivel_aserradero, 
+                   t.nivel_granja AS nivel_granja, 
+                   t.hierro AS hierro, 
+                   t.madera AS madera, 
+                   t.construccion_fin AS fin
         `, { nombre: nombreJugador });
 
         if (result.records.length === 0) return res.status(404).json({ error: 'Jugador no encontrado.' });
 
         const data = result.records[0];
-        const nivelActual = toNum(data.get('nivel'));
+        // Elegimos el nivel correcto en JavaScript
+        const nivelActual = toNum(data.get(nivelKey));
         const hierroActual = toNum(data.get('hierro'));
         const maderaActual = toNum(data.get('madera'));
         const construccionFin = data.get('fin'); 
@@ -164,7 +169,6 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
     }
 });
 
-// Función para generar el HTML de un edificio
 function generarHtmlEdificio(nombreJugador, edificio, nivelActual, estaConstruyendo, tipoConstruccion, construccionFin, ahora) {
     const nombres = { 'mina-hierro': 'Mina de Hierro', 'aserradero': 'Aserradero', 'granja': 'Granja' };
     const produccion = { 'mina-hierro': nivelActual * 1000, 'aserradero': nivelActual * 800, 'granja': nivelActual * 600 };
@@ -194,7 +198,6 @@ function generarHtmlEdificio(nombreJugador, edificio, nivelActual, estaConstruye
             </script>
         `;
     } else if (estaConstruyendo) {
-        // Hay otro edificio construyéndose, mostramos deshabilitado
         return `
             <div class="edificio">
                 <b>${nombres[edificio]} (Nivel ${nivelActual})</b> - Prod: ${produccion[edificio]}/h<br>
@@ -227,7 +230,6 @@ app.get('/panel/:nombre', async (req, res) => {
     try {
         const ahora = Date.now();
         
-        // 1. Finaliza construcción si el tiempo pasó
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             WHERE t.construccion_fin IS NOT NULL AND t.construccion_fin <= $ahora
@@ -238,10 +240,8 @@ app.get('/panel/:nombre', async (req, res) => {
                 t.construccion_tipo = null
         `, { nombre: nombreJugador, ahora: ahora });
 
-        // 2. Actualiza recursos
         await actualizarRecursos(session, nombreJugador);
 
-        // 3. Carga datos
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             RETURN t.nombre AS territorio, t.hierro AS hierro, t.madera AS madera, 
