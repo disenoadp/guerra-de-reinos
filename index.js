@@ -9,7 +9,7 @@ const driver = neo4j.driver(
 );
 
 function toNum(val) {
-    if (val === null || val === undefined) return null;
+    if (val === null || val === undefined) return 0;
     return typeof val === 'number' ? val : val.toNumber();
 }
 
@@ -24,10 +24,8 @@ async function actualizarRecursos(session, nombreJugador) {
     `, { nombre: nombreJugador, ahora: ahora });
 }
 
-// Función para resolver batallas cuando las tropas vuelven
 async function resolverBatallas(session, nombreJugador) {
     const ahora = Date.now();
-    // 1. Buscamos ataques que hayan terminado
     const result = await session.run(`
         MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(origen:Territorio)
         WHERE origen.ataque_fin IS NOT NULL AND origen.ataque_fin <= $ahora
@@ -39,14 +37,13 @@ async function resolverBatallas(session, nombreJugador) {
         const destinoNom = record.get('destino');
         const tropas = toNum(record.get('tropas'));
 
-        // 2. Realizamos el saqueo (robamos la mitad de los recursos del enemigo)
         await session.run(`
             MATCH (origen:Territorio {nombre: $origenNom}), (destino:Territorio {nombre: $destinoNom})
             SET origen.hierro = toInteger(origen.hierro + destino.hierro * 0.5),
                 origen.madera = toInteger(origen.madera + destino.madera * 0.5),
                 destino.hierro = toInteger(destino.hierro * 0.5),
                 destino.madera = toInteger(destino.madera * 0.5),
-                origen.tropas_hostigador = toInteger(origen.tropas_hostigador + $tropas), // Las tropas vuelven
+                origen.tropas_hostigador = toInteger(origen.tropas_hostigador + $tropas),
                 origen.ataque_fin = null,
                 origen.ataque_destino = null,
                 origen.ataque_tropas = 0
@@ -58,7 +55,6 @@ app.get('/', (req, res) => {
     res.send('<h1>Guerra de Reinos</h1><p>El servidor del continente esta activo.</p>');
 });
 
-// ... (Rutas /mapa y /generar-mapa siguen igual) ...
 app.get('/mapa', async (req, res) => {
     const session = driver.session();
     try {
@@ -70,7 +66,7 @@ app.get('/mapa', async (req, res) => {
         });
         if (territorios.length === 0) res.send('<h1>Mapa de Aethel</h1><p>El mapa esta vacio. Visita /generar-mapa.</p>');
         else res.send(`<h1>Mapa de Aethel</h1><ul>${territorios.map(t => `<li>${t}</li>`).join('')}</ul>`);
-    } catch (error) { res.status(500).send('Error.'); } finally { await session.close(); }
+    } catch (error) { console.error(error); res.status(500).send('Error.'); } finally { await session.close(); }
 });
 
 app.get('/generar-mapa', async (req, res) => {
@@ -78,22 +74,27 @@ app.get('/generar-mapa', async (req, res) => {
     try {
         await session.run('MATCH (n) DETACH DELETE n');
         for (let i = 1; i <= 5; i++) {
-            await session.run('CREATE (t:Territorio {id: $id, nombre: $nombre, ocupado: false})', { id: i, nombre: `Territorio ${i}` });
+            await session.run('CREATE (t:Territorio {nombre: $nombre, ocupado: false})', { nombre: `Territorio ${i}` });
         }
         for (let i = 1; i < 5; i++) {
-            await session.run(`MATCH (a:Territorio {id: $a}), (b:Territorio {id: $b}) CREATE (a)-[:FRONTERA]->(b) CREATE (b)-[:FRONTERA]->(a)`, { a: i, b: i + 1 });
+            await session.run(`MATCH (a:Territorio {nombre: $a}), (b:Territorio {nombre: $b}) CREATE (a)-[:FRONTERA]->(b) CREATE (b)-[:FRONTERA]->(a)`, { a: `Territorio ${i}`, b: `Territorio ${i+1}` });
         }
         res.send('Mapa generado con exito.');
-    } catch (error) { res.status(500).send('Error.'); } finally { await session.close(); }
+    } catch (error) { console.error(error); res.status(500).send('Error al generar mapa.'); } finally { await session.close(); }
 });
 
 app.get('/registrar/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
+        // Protección contra duplicados
+        const checkJugador = await session.run(`MATCH (j:Jugador {nombre: $nombre}) RETURN j`, { nombre: nombreJugador });
+        if (checkJugador.records.length > 0) return res.send('Ese nombre de jugador ya existe. Elige otro.');
+
         const result = await session.run(`MATCH (t:Territorio {ocupado: false}) RETURN t.nombre AS nombre ORDER BY rand() LIMIT 1`);
         if (result.records.length === 0) return res.send('No hay territorios vacios.');
         const territorioNombre = result.records[0].get('nombre');
+        
         await session.run(`
             MATCH (t:Territorio {nombre: $nombre})
             CREATE (j:Jugador {nombre: $jugador})
@@ -108,10 +109,9 @@ app.get('/registrar/:nombre', async (req, res) => {
                 t.ultima_visita = $ahora
         `, { nombre: territorioNombre, jugador: nombreJugador, ahora: Date.now() });
         res.send(`<h1>Bienvenido, ${nombreJugador}</h1><p>Visita /panel/${nombreJugador}</p>`);
-    } catch (error) { res.status(500).send('Error.'); } finally { await session.close(); }
+    } catch (error) { console.error(error); res.status(500).send('Error al registrar.'); } finally { await session.close(); }
 });
 
-// Ruta para Construir
 app.get('/construir/:nombre/:edificio', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const edificio = req.params.edificio;
@@ -145,10 +145,9 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
                 t.construccion_tipo = $edificio, t.construccion_fin = $tiempoFin
         `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera, tiempoFin: tiempoFin, edificio: edificio });
         res.json({ success: true });
-    } catch (error) { res.status(500).json({ error: 'Error interno.' }); } finally { await session.close(); }
+    } catch (error) { console.error(error); res.status(500).json({ error: 'Error interno.' }); } finally { await session.close(); }
 });
 
-// Ruta para Entrenar
 app.get('/entrenar/:nombre/:tropa', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const tropa = req.params.tropa;
@@ -179,58 +178,41 @@ app.get('/entrenar/:nombre/:tropa', async (req, res) => {
                 t.oro = toInteger(t.oro - $costeOro), t.entrenando_tipo = $tropa, t.entrenando_fin = $tiempoFin
         `, { nombre: nombreJugador, costeH: costeHierro, costeM: costeMadera, costeOro: costeOro, tiempoFin: tiempoFin, tropa: tropa });
         res.json({ success: true });
-    } catch (error) { res.status(500).json({ error: 'Error interno.' }); } finally { await session.close(); }
+    } catch (error) { console.error(error); res.status(500).json({ error: 'Error interno.' }); } finally { await session.close(); }
 });
 
-// NUEVA RUTA: Lanzar Ataque
 app.get('/atacar/:nombre/:destino', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const destino = req.params.destino;
     const session = driver.session();
     try {
         await actualizarRecursos(session, nombreJugador);
-        
-        // 1. Obtenemos datos del atacante y calculamos la distancia en el grafo
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(origen:Territorio), (destino:Territorio {nombre: $destino})
-            RETURN origen.tropas_hostigador AS tropas, origen.ataque_fin AS fin,
+            RETURN origen.nombre AS origen_nom, origen.tropas_hostigador AS tropas, origen.ataque_fin AS fin,
                    shortestPath((origen)-[:FRONTERA*]-(destino)) AS path
         `, { nombre: nombreJugador, destino: destino });
-        
-        if (result.records.length === 0) return res.status(404).json({ error: 'Territorio destino no encontrado.' });
-
+        if (result.records.length === 0) return res.status(400).json({ error: 'Territorio destino no encontrado.' });
         const data = result.records[0];
+        const origenNom = data.get('origen_nom');
         const tropas = toNum(data.get('tropas'));
         const atacandoFin = data.get('fin');
         const path = data.get('path');
-
+        if (origenNom === destino) return res.status(400).json({ error: 'No puedes atacar tu propio territorio.' });
         if (atacandoFin !== null) return res.status(400).json({ error: 'Ya tienes tropas en marcha.' });
         if (tropas === 0) return res.status(400).json({ error: 'No tienes tropas para enviar.' });
-
-        // La distancia es el número de saltos en el camino
-        const distancia = path.length; 
-        const tiempoViajeMs = (distancia * 30) * 1000; // 30 segundos por salto
+        const distancia = path ? path.length : 1; 
+        const tiempoViajeMs = (distancia * 30) * 1000; 
         const tiempoFin = Date.now() + tiempoViajeMs;
-
-        // 2. Enviamos tropas (se restan de la base y se guardan en "ataque_tropas")
         await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio)
             SET t.tropas_hostigador = toInteger(t.tropas_hostigador - $tropas),
-                t.ataque_destino = $destino,
-                t.ataque_fin = $tiempoFin,
-                t.ataque_tropas = $tropas
+                t.ataque_destino = $destino, t.ataque_fin = $tiempoFin, t.ataque_tropas = $tropas
         `, { nombre: nombreJugador, destino: destino, tiempoFin: tiempoFin, tropas: tropas });
-
         res.json({ success: true, distancia: distancia });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error interno.' });
-    } finally {
-        await session.close();
-    }
+    } catch (error) { console.error(error); res.status(500).json({ error: 'Error interno.' }); } finally { await session.close(); }
 });
 
-// Función HTML para Edificios
 function generarHtmlEdificio(nombreJugador, edificio, nivelActual, estaConstruyendo, tipoConstruccion, construccionFin, ahora) {
     const nombres = { 'mina-hierro': 'Mina de Hierro', 'aserradero': 'Aserradero', 'granja': 'Granja', 'cuartel': 'Cuartel' };
     const produccion = { 'mina-hierro': nivelActual * 1000, 'aserradero': nivelActual * 800, 'granja': nivelActual * 600, 'cuartel': '-' };
@@ -246,13 +228,12 @@ function generarHtmlEdificio(nombreJugador, edificio, nivelActual, estaConstruye
     }
 }
 
-// Ruta del Panel
 app.get('/panel/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
         const ahora = Date.now();
-        await resolverBatallas(session, nombreJugador); // Resuelve si las tropas volvieron
+        await resolverBatallas(session, nombreJugador);
         await session.run(`MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio) WHERE t.construccion_fin IS NOT NULL AND t.construccion_fin <= $ahora SET t.nivel_mina_hierro = CASE WHEN t.construccion_tipo = 'mina-hierro' THEN t.nivel_mina_hierro + 1 ELSE t.nivel_mina_hierro END, t.nivel_aserradero = CASE WHEN t.construccion_tipo = 'aserradero' THEN t.nivel_aserradero + 1 ELSE t.nivel_aserradero END, t.nivel_granja = CASE WHEN t.construccion_tipo = 'granja' THEN t.nivel_granja + 1 ELSE t.nivel_granja END, t.nivel_cuartel = CASE WHEN t.construccion_tipo = 'cuartel' THEN t.nivel_cuartel + 1 ELSE t.nivel_cuartel END, t.construccion_fin = null, t.construccion_tipo = null`, { nombre: nombreJugador, ahora: ahora });
         await session.run(`MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio) WHERE t.entrenando_fin IS NOT NULL AND t.entrenando_fin <= $ahora SET t.tropas_hostigador = t.tropas_hostigador + 1, t.entrenando_fin = null, t.entrenando_tipo = null`, { nombre: nombreJugador, ahora: ahora });
         await actualizarRecursos(session, nombreJugador);
@@ -294,12 +275,10 @@ app.get('/panel/:nombre', async (req, res) => {
     } catch (error) { console.error(error); res.status(500).send('Error.'); } finally { await session.close(); }
 });
 
-// NUEVA RUTA: Sala de Guerra (Lista de territorios para atacar)
 app.get('/guerra/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
-        // Buscamos el territorio del jugador y calculamos la distancia a TODOS los demás
         const result = await session.run(`
             MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(origen:Territorio), (destino:Territorio)
             WHERE origen <> destino
@@ -312,7 +291,7 @@ app.get('/guerra/:nombre', async (req, res) => {
             const nombre = record.get('nombre');
             const duenio = record.get('duenio') || 'Vacío';
             const distancia = toNum(record.get('distancia'));
-            const tiempo = distancia * 30; // 30 segundos por salto
+            const tiempo = distancia * 30;
             return `<tr><td>${nombre}</td><td>${duenio}</td><td>${distancia}</td><td>${tiempo}s</td><td><a href="/atacar/${nombreJugador}/${nombre}" class="btn-atacar">Atacar</a></td></tr>`;
         }).join('');
 
