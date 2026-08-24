@@ -72,15 +72,26 @@ app.get('/mapa', async (req, res) => {
 app.get('/generar-mapa', async (req, res) => {
     const session = driver.session();
     try {
-        await session.run('MATCH (n) DETACH DELETE n');
-        for (let i = 1; i <= 5; i++) {
-            await session.run('CREATE (t:Territorio {nombre: $nombre, ocupado: false})', { nombre: `Territorio ${i}` });
-        }
-        for (let i = 1; i < 5; i++) {
-            await session.run(`MATCH (a:Territorio {nombre: $a}), (b:Territorio {nombre: $b}) CREATE (a)-[:FRONTERA]->(b) CREATE (b)-[:FRONTERA]->(a)`, { a: `Territorio ${i}`, b: `Territorio ${i+1}` });
-        }
+        // Borramos todo y creamos el mapa en una sola consulta segura
+        await session.run(`
+            MATCH (n) DETACH DELETE n
+            CREATE (t1:Territorio {nombre: 'Territorio 1', ocupado: false}),
+                   (t2:Territorio {nombre: 'Territorio 2', ocupado: false}),
+                   (t3:Territorio {nombre: 'Territorio 3', ocupado: false}),
+                   (t4:Territorio {nombre: 'Territorio 4', ocupado: false}),
+                   (t5:Territorio {nombre: 'Territorio 5', ocupado: false})
+            CREATE (t1)-[:FRONTERA]->(t2), (t2)-[:FRONTERA]->(t1),
+                   (t2)-[:FRONTERA]->(t3), (t3)-[:FRONTERA]->(t2),
+                   (t3)-[:FRONTERA]->(t4), (t4)-[:FRONTERA]->(t3),
+                   (t4)-[:FRONTERA]->(t5), (t5)-[:FRONTERA]->(t4)
+        `);
         res.send('Mapa generado con exito.');
-    } catch (error) { console.error(error); res.status(500).send('Error al generar mapa.'); } finally { await session.close(); }
+    } catch (error) {
+        console.error("ERROR GENERANDO MAPA:", error);
+        res.status(500).send('Error al generar mapa. Revisa los logs de Render.');
+    } finally {
+        await session.close();
+    }
 });
 
 app.get('/registrar/:nombre', async (req, res) => {
