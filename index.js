@@ -8,6 +8,12 @@ const driver = neo4j.driver(
     neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)
 );
 
+// CONFIGURACIÓN VISUAL
+app.set('view engine', 'ejs'); // Usamos EJS para las pantallas
+app.use(express.urlencoded({ extended: true })); // Para leer formularios
+app.use(express.json()); 
+app.use(express.static('public')); // Carpeta para nuestros CSS e imágenes
+
 function toNum(val) {
     if (val === null || val === undefined) return 0;
     return typeof val === 'number' ? val : val.toNumber();
