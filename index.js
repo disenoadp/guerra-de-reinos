@@ -57,8 +57,29 @@ async function resolverBatallas(session, nombreJugador) {
     }
 }
 
+// Ruta principal: muestra el Login
 app.get('/', (req, res) => {
-    res.send('<h1>Guerra de Reinos</h1><p>El servidor del continente esta activo.</p>');
+    res.render('login', { error: null });
+});
+
+// Ruta para procesar el login
+app.post('/entrar', async (req, res) => {
+    const nombre = req.body.usuario;
+    const session = driver.session();
+    try {
+        const result = await session.run(`MATCH (j:Jugador {nombre: $nombre}) RETURN j`, { nombre: nombre });
+        if (result.records.length > 0) {
+            // Si el jugador existe, lo mandamos a su panel
+            res.redirect(`/panel/${nombre}`);
+        } else {
+            // Si no existe, devolvemos error al login
+            res.render('login', { error: 'Ese rey no existe en el continente.' });
+        }
+    } catch (error) {
+        res.status(500).send('Error al entrar.');
+    } finally {
+        await session.close();
+    }
 });
 
 app.get('/mapa', async (req, res) => {
