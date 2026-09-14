@@ -8,11 +8,13 @@ const driver = neo4j.driver(
     neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)
 );
 
+// CONFIGURACIÓN VISUAL Y DATOS
 app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('public'));
 
+// FUNCIONES HELPER
 function toNum(val) {
     if (val === null || val === undefined) return 0;
     return typeof val === 'number' ? val : val.toNumber();
@@ -53,7 +55,7 @@ async function resolverBatallas(session, nombreJugador) {
     }
 }
 
-// --- RUTAS DE LOGIN Y MAPA ---
+// --- RUTAS DE LOGIN Y REGISTRO ---
 app.get('/', (req, res) => res.render('login', { error: null, success: null }));
 
 app.post('/entrar', async (req, res) => {
@@ -62,8 +64,8 @@ app.post('/entrar', async (req, res) => {
     try {
         const result = await session.run(`MATCH (j:Jugador {nombre: $nombre}) RETURN j`, { nombre });
         if (result.records.length > 0) res.redirect(`/panel/${nombre}`);
-        else res.render('login', { error: 'Ese rey no existe.', success: null });
-    } catch (e) { res.status(500).send('Error'); } finally { await session.close(); }
+        else res.render('login', { error: 'Ese rey no existe en el continente.', success: null });
+    } catch (e) { res.status(500).send('Error al entrar.'); } finally { await session.close(); }
 });
 
 app.post('/crear-rey', async (req, res) => {
@@ -71,10 +73,10 @@ app.post('/crear-rey', async (req, res) => {
     const session = driver.session();
     try {
         const check = await session.run(`MATCH (j:Jugador {nombre: $nombre}) RETURN j`, { nombre });
-        if (check.records.length > 0) return res.render('login', { error: 'Nombre en uso.', success: null });
+        if (check.records.length > 0) return res.render('login', { error: 'Ese nombre de rey ya está en uso.', success: null });
         
         const result = await session.run(`MATCH (t:Territorio {ocupado: false}) RETURN t.nombre AS nombre ORDER BY rand() LIMIT 1`);
-        if (result.records.length === 0) return res.render('login', { error: 'Continente lleno.', success: null });
+        if (result.records.length === 0) return res.render('login', { error: 'El continente está lleno. No hay territorios vacíos.', success: null });
         
         const territorioNombre = result.records[0].get('nombre');
         await session.run(`
@@ -87,9 +89,10 @@ app.post('/crear-rey', async (req, res) => {
                 t.ataque_destino = null, t.ataque_fin = null, t.ataque_tropas = 0, t.ultima_visita = $ahora
         `, { nombre: territorioNombre, jugador: nombre, ahora: Date.now() });
         res.redirect(`/panel/${nombre}`);
-    } catch (e) { res.status(500).send('Error'); } finally { await session.close(); }
+    } catch (e) { res.status(500).send('Error al registrar.'); } finally { await session.close(); }
 });
 
+// --- RUTA DE GENERACIÓN DE MAPA ---
 app.get('/generar-mapa', async (req, res) => {
     const session = driver.session();
     try {
@@ -97,19 +100,36 @@ app.get('/generar-mapa', async (req, res) => {
         await session.run(`UNWIND range(1, 3) AS region UNWIND range(1, 3) AS provincia UNWIND range(1, 3) AS territorio MERGE (t:Territorio {nombre: 'R'+region+'-P'+provincia+'-T'+territorio, ocupado: false, region: region, provincia: provincia})`);
         await session.run(`MATCH (t1:Territorio), (t2:Territorio) WHERE t1.region = t2.region AND t1.provincia = t2.provincia AND t1.nombre <> t2.nombre MERGE (t1)-[:FRONTERA]->(t2) MERGE (t2)-[:FRONTERA]->(t1)`);
         await session.run(`MATCH (t1:Territorio), (t2:Territorio) WHERE t1.region = t2.region AND t1.provincia <> t2.provincia AND abs(t1.provincia - t2.provincia) = 1 MERGE (t1)-[:FRONTERA]->(t2) MERGE (t2)-[:FRONTERA]->(t1)`);
-        res.render('login', { error: null, success: 'Mapa generado. 27 territorios creados.' });
-    } catch (error) { res.status(500).send('Error'); } finally { await session.close(); }
+        res.render('login', { error: null, success: 'Mapa generado con éxito. 27 territorios creados. ¡Regístrate!' });
+    } catch (error) { console.error("ERROR GENERANDO MAPA:", error); res.status(500).send('Error al generar mapa.'); } finally { await session.close(); }
 });
 
-// --- RUTAS DEL JUEGO ---
+// --- RUTA DEL MAPA VISUAL ---
+app.get('/mapa', async (req, res) => {
+    const session = driver.session();
+    try {
+        const result = await session.run(`MATCH (t:Territorio) OPTIONAL MATCH (j:Jugador)-[:POSEE]->(t) RETURN t.nombre AS nombre, j.nombre AS dueno`);
+        const territorios = result.records.map(r => ({ nombre: r.get('nombre'), dueno: r.get('dueno') }));
+        const jugadorUrl = req.query.jugador || ''; 
+        res.render('mapa', { territorios: territorios, jugador: jugadorUrl });
+    } catch (e) { console.error(e); res.status(500).send('Error'); } finally { await session.close(); }
+});
+
+// --- RUTA DEL PANEL (DASHBOARD) ---
 app.get('/panel/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
     try {
         const ahora = Date.now();
         await resolverBatallas(session, nombreJugador);
+        
+        // Actualizar construcciones terminadas
         await session.run(`MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio) WHERE t.construccion_fin IS NOT NULL AND t.construccion_fin <= $ahora SET t.nivel_mina_hierro = CASE WHEN t.construccion_tipo = 'mina-hierro' THEN t.nivel_mina_hierro + 1 ELSE t.nivel_mina_hierro END, t.nivel_aserradero = CASE WHEN t.construccion_tipo = 'aserradero' THEN t.nivel_aserradero + 1 ELSE t.nivel_aserradero END, t.nivel_granja = CASE WHEN t.construccion_tipo = 'granja' THEN t.nivel_granja + 1 ELSE t.nivel_granja END, t.nivel_cuartel = CASE WHEN t.construccion_tipo = 'cuartel' THEN t.nivel_cuartel + 1 ELSE t.nivel_cuartel END, t.construccion_fin = null, t.construccion_tipo = null`, { nombre: nombreJugador, ahora });
+        
+        // Actualizar entrenamientos terminados
         await session.run(`MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio) WHERE t.entrenando_fin IS NOT NULL AND t.entrenando_fin <= $ahora SET t.tropas_hostigador = t.tropas_hostigador + 1, t.entrenando_fin = null, t.entrenando_tipo = null`, { nombre: nombreJugador, ahora });
+        
+        // Actualizar recursos pasivos
         await actualizarRecursos(session, nombreJugador);
         
         const result = await session.run(`MATCH (j:Jugador {nombre: $nombre})-[:POSEE]->(t:Territorio) RETURN t.nombre AS territorio, t.hierro AS hierro, t.madera AS madera, t.oro AS oro, t.alimento AS alimento, t.nivel_mina_hierro AS mina, t.nivel_aserradero AS aserradero, t.nivel_granja AS granja, t.nivel_cuartel AS cuartel, t.tropas_hostigador AS tropas, t.construccion_fin AS fin_c, t.construccion_tipo AS tipo_c, t.entrenando_fin AS fin_e, t.ataque_fin AS fin_a, t.ataque_destino AS destino_a`, { nombre: nombreJugador });
@@ -123,11 +143,13 @@ app.get('/panel/:nombre', async (req, res) => {
             mina: toNum(d.get('mina')), aserradero: toNum(d.get('aserradero')), granja: toNum(d.get('granja')), cuartel: toNum(d.get('cuartel')),
             tropas: toNum(d.get('tropas')),
             construccionFin: d.get('fin_c') ? toNum(d.get('fin_c')) : null, tipoConstruccion: d.get('tipo_c'),
-            entrenandoFin: d.get('fin_e'), ataqueFin: d.get('fin_a'), ataqueDestino: d.get('destino_a')
+            entrenandoFin: d.get('fin_e') ? toNum(d.get('fin_e')) : null, ataqueFin: d.get('fin_a') ? toNum(d.get('fin_a')) : null, ataqueDestino: d.get('destino_a'),
+            ahora: ahora
         });
     } catch (e) { console.error(e); res.status(500).send('Error'); } finally { await session.close(); }
 });
 
+// --- RUTAS DE ACCIÓN (CONSTRUIR, ENTRENAR, ATACAR) ---
 app.get('/construir/:nombre/:edificio', async (req, res) => {
     const { nombre: nombreJugador, edificio } = req.params;
     const session = driver.session();
@@ -164,7 +186,6 @@ app.get('/entrenar/:nombre/:tropa', async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Error' }); } finally { await session.close(); }
 });
 
-// (Las rutas de /atacar, /guerra y /chat se mantienen funcionalmente igual, las adaptaremos visualmente en el siguiente paso si lo deseas)
 app.get('/atacar/:nombre/:destino', async (req, res) => {
     const { nombre: nombreJugador, destino } = req.params;
     const session = driver.session();
@@ -183,6 +204,7 @@ app.get('/atacar/:nombre/:destino', async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Error' }); } finally { await session.close(); }
 });
 
+// --- RUTAS DE GUERRA Y CHAT ---
 app.get('/guerra/:nombre', async (req, res) => {
     const nombreJugador = req.params.nombre;
     const session = driver.session();
@@ -203,9 +225,9 @@ app.get('/chat/:nombre', async (req, res) => {
     const session = driver.session();
     try {
         const result = await session.run(`MATCH (m:Mensaje) RETURN m.autor AS a, m.texto AS t ORDER BY m.tiempo DESC LIMIT 20`);
-        let html = `<link rel="stylesheet" href="/css/style.css"><div class="container"><h2 class="section-title">Tablón</h2><div class="card" style="height:400px; overflow-y:auto;">`;
+        let html = `<link rel="stylesheet" href="/css/style.css"><div class="container"><h2 class="section-title">Tablón del Continente</h2><div class="card" style="height:400px; overflow-y:auto;">`;
         result.records.reverse().forEach(r => { html += `<p><b>${r.get('a')}:</b> ${r.get('t')}</p>`; });
-        html += `</div><form action="/enviar-mensaje" method="POST" style="display:flex; gap:10px; margin-top:10px;"><input type="hidden" name="autor" value="${nombreJugador}"><input type="text" name="texto" class="form-control" style="flex-grow:1; padding:10px;" required><button class="btn">Enviar</button></form><br><a href="/panel/${nombreJugador}" class="btn">Volver</a></div>`;
+        html += `</div><form action="/enviar-mensaje" method="POST" style="display:flex; gap:10px; margin-top:10px;"><input type="hidden" name="autor" value="${nombreJugador}"><input type="text" name="texto" style="flex-grow:1; padding:10px; background:#34495e; border:1px solid #7f8c8d; color:white; border-radius:4px;" required><button class="btn">Enviar</button></form><br><a href="/panel/${nombreJugador}" class="btn">Volver</a></div>`;
         res.send(html);
     } catch (e) { res.status(500).send('Error'); } finally { await session.close(); }
 });
