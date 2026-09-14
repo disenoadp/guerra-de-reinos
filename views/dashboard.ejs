@@ -26,7 +26,7 @@
                         <span>Prod: <%= m_metal * 30 %>/h<br><small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_metal)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_metal)) %> C</small></span>
                         <% if (tiempo_construccion > 0 && tipo_construccion === 'mina_metal') { %>
                             <span class="timer" data-time="<%= tiempo_construccion %>">Calculando...</span>
-                        <% } else if (tiempo_construamiento > 0) { %>
+                        <% } else if (tiempo_construccion > 0) { %>
                             <span class="timer">En cola...</span>
                         <% } else { %>
                             <button onclick="accion('construir', 'mina_metal')" class="btn">Mejorar</button>
