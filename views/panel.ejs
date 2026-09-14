@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>OGame Clone - <%= jugador %></title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div id="header">
+        <div class="time">Universo 1 - <%= new Date().toLocaleTimeString() %></div>
+        <div id="resources">
+            <div>Metal: <b><%= metal %></b></div>
+            <div>Cristal: <b><%= cristal %></b></div>
+            <div>Deuterio: <b><%= deuterio %></b></div>
+        </div>
+    </div>
+
+    <div id="content">
+        <div id="menu-left">
+            <a href="/panel/<%= jugador %>" class="<%= pagina === 'recursos' ? 'active' : '' %>">Recursos</a>
+            <a href="/panel/<%= jugador %>/instalaciones" class="<%= pagina === 'instalaciones' ? 'active' : '' %>">Instalaciones</a>
+            <a href="/panel/<%= jugador %>/hangar" class="<%= pagina === 'hangar' ? 'active' : '' %>">Hangar</a>
+            <a href="/galaxia/<%= jugador %>" class="<%= pagina === 'galaxia' ? 'active' : '' %>">Galaxia</a>
+            <a href="/" style="margin-top: auto; color: #c0392b;">Cerrar Sesión</a>
+        </div>
+
+        <div id="main">
+            <div id="main-inner">
+                
+                <% if (pagina === 'recursos') { %>
+                    <h2 class="section-title">Recursos</h2>
+                    <div class="building-list">
+                        <div class="building-item">
+                            <div class="building-info">
+                                <h3>Mina de Metal (Nivel <%= m_metal %>)</h3>
+                                <p>Producción: <%= m_metal * 30 %>/h</p>
+                                <small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_metal)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_metal)) %> C</small>
+                            </div>
+                            <div class="building-action">
+                                <% if (tiempo_construccion > 0 && tipo_construccion === 'mina_metal') { %>
+                                    <span class="timer" data-time="<%= tiempo_construccion %>">Mejorando...</span>
+                                <% } else if (tiempo_construccion > 0) { %>
+                                    <span class="timer">En cola...</span>
+                                <% } else { %>
+                                    <button onclick="accion('construir', 'mina_metal')" class="btn-build">Mejorar</button>
+                                <% } %>
+                            </div>
+                        </div>
+
+                        <div class="building-item">
+                            <div class="building-info">
+                                <h3>Mina de Cristal (Nivel <%= m_cristal %>)</h3>
+                                <p>Producción: <%= m_cristal * 20 %>/h</p>
+                                <small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_cristal)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_cristal)) %> C</small>
+                            </div>
+                            <div class="building-action">
+                                <% if (tiempo_construccion > 0 && tipo_construccion === 'mina_cristal') { %>
+                                    <span class="timer" data-time="<%= tiempo_construccion %>">Mejorando...</span>
+                                <% } else if (tiempo_construccion > 0) { %>
+                                    <span class="timer">En cola...</span>
+                                <% } else { %>
+                                    <button onclick="accion('construir', 'mina_cristal')" class="btn-build">Mejorar</button>
+                                <% } %>
+                            </div>
+                        </div>
+
+                        <div class="building-item">
+                            <div class="building-info">
+                                <h3>Sintetizador de Deuterio (Nivel <%= m_deut %>)</h3>
+                                <p>Producción: <%= m_deut * 10 %>/h</p>
+                                <small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_deut)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_deut)) %> C</small>
+                            </div>
+                            <div class="building-action">
+                                <% if (tiempo_construccion > 0 && tipo_construccion === 'sintetizador') { %>
+                                    <span class="timer" data-time="<%= tiempo_construccion %>">Mejorando...</span>
+                                <% } else if (tiempo_construccion > 0) { %>
+                                    <span class="timer">En cola...</span>
+                                <% } else { %>
+                                    <button onclick="accion('construir', 'sintetizador')" class="btn-build">Mejorar</button>
+                                <% } %>
+                            </div>
+                        </div>
+                    </div>
+
+                <% } else if (pagina === 'instalaciones') { %>
+                    <h2 class="section-title">Instalaciones</h2>
+                    <div class="building-list">
+                        <div class="building-item">
+                            <div class="building-info">
+                                <h3>Hangar (Nivel <%= m_hangar %>)</h3>
+                                <p>Permite construir naves</p>
+                                <small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_hangar)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_hangar)) %> C</small>
+                            </div>
+                            <div class="building-action">
+                                <% if (tiempo_construccion > 0 && tipo_construccion === 'hangar') { %>
+                                    <span class="timer" data-time="<%= tiempo_construccion %>">Mejorando...</span>
+                                <% } else if (tiempo_construccion > 0) { %>
+                                    <span class="timer">En cola...</span>
+                                <% } else { %>
+                                    <button onclick="accion('construir', 'hangar')" class="btn-build">Mejorar</button>
+                                <% } %>
+                            </div>
+                        </div>
+                    </div>
+
+                <% } else if (pagina === 'hangar') { %>
+                    <h2 class="section-title">Hangar</h2>
+                    <div class="building-list">
+                        <div class="building-item">
+                            <div class="building-info">
+                                <h3>Cazador Ligero</h3>
+                                <p>Tienes: <%= cazador %></p>
+                                <small>Coste: 3000 M, 1000 C (Tarda 30s)</small>
+                            </div>
+                            <div class="building-action">
+                                <% if (m_hangar > 0 && tiempo_entrenamiento === 0) { %>
+                                    <button onclick="accion('entrenar', 'cazador')" class="btn-build">Construir</button>
+                                <% } else if (tiempo_entrenamiento > 0) { %>
+                                    <span class="timer" data-time="<%= tiempo_entrenamiento %>">En construcción...</span>
+                                <% } else { %>
+                                    <span style="color:#7f8c8d;">Requiere Hangar</span>
+                                <% } %>
+                            </div>
+                        </div>
+                    </div>
+
+                <% } else if (pagina === 'flota') { %>
+                    <h2 class="section-title">Flota</h2>
+                    <div class="building-list">
+                        <% if (tiempo_ataque > 0) { %>
+                            <div class="building-item">
+                                <div class="building-info">
+                                    <h3>Misión en curso</h3>
+                                    <p>Objetivo: <%= ataque_destino %></p>
+                                </div>
+                                <div class="building-action">
+                                    <span class="timer" data-time="<%= tiempo_ataque %>">Volviendo...</span>
+                                </div>
+                            </div>
+                        <% } else if (cazador > 0) { %>
+                            <div class="building-item">
+                                <div class="building-info">
+                                    <h3>Cazadores Listos</h3>
+                                    <p>Tienes <%= cazador %> cazadores en órbita.</p>
+                                </div>
+                                <div class="building-action">
+                                    <a href="/galaxia/<%= jugador %>" class="btn-build" style="text-decoration:none; display:inline-block;">Ver Galaxia</a>
+                                </div>
+                            </div>
+                        <% } else { %>
+                            <div class="building-item">
+                                <div class="building-info"><h3>Sin flota</h3><p>Construye cazadores en el Hangar.</p></div>
+                            </div>
+                        <% } %>
+                    </div>
+                <% } %>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function accion(tipo, item) {
+            fetch(`/${tipo}/<%= jugador %>/${item}`).then(r => r.json()).then(d => { if(d.success) location.reload(); else alert(d.error); });
+        }
+
+        document.querySelectorAll('.timer').forEach(el => {
+            let t = parseInt(el.getAttribute('data-time'));
+            setInterval(() => {
+                if (t <= 0) {
+                    el.innerHTML = '<b style="color:lightgreen;">¡Listo! <a href="/panel/<%= jugador %>" style="color:white;">Actualizar</a></b>';
+                } else {
+                    el.innerText = t + 's';
+                    t--;
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
