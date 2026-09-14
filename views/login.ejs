@@ -2,34 +2,29 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Guerra de Reinos - Acceso</title>
-    <style>
-        body { font-family: Georgia, serif; background-color: #1a1a1a; color: #f0f0f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .login-box { background: #2c3e50; padding: 40px; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); width: 350px; text-align: center; border: 2px solid #f39c12; }
-        h1 { color: #f39c12; margin-top: 0; text-transform: uppercase; letter-spacing: 2px; }
-        p { color: #bdc3c7; font-size: 14px; margin-bottom: 20px; }
-        input { width: 100%; padding: 12px; margin: 8px 0; box-sizing: border-box; border: 1px solid #7f8c8d; border-radius: 5px; background: #34495e; color: white; }
-        button { width: 100%; padding: 12px; margin-top: 10px; background: #f39c12; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; text-transform: uppercase; }
-        button:hover { background: #d35400; }
-        .error { color: #e74c3c; margin-top: 15px; font-size: 14px; }
-        a { color: #3498db; text-decoration: none; display: block; margin-top: 15px; font-size: 13px; }
-    </style>
+    <title>Guerra de Reinos</title>
+    <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-    <div class="login-box">
-        <h1>Guerra de Reinos</h1>
-        <p>El continente te espera. ¿Estás listo para conquistar?</p>
-        
-        <% if (error) { %>
-            <div class="error"><%= error %></div>
-        <% } %>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>Guerra de Reinos</h1>
+            
+            <% if (error) { %> <div class="error"><%= error %></div> <% } %>
+            <% if (success) { %> <div class="success"><%= success %></div> <% } %>
 
-        <form action="/entrar" method="POST">
-            <input type="text" name="usuario" placeholder="Introduce tu nombre de Rey" required>
-            <button type="submit">Entrar al Reino</button>
-        </form>
-        <a href="/registrar-map">Primera vez aquí? Generar Mapa</a>
+            <form action="/entrar" method="POST">
+                <input type="text" name="usuario" placeholder="Nombre de Rey" required>
+                <button type="submit" class="btn-login">Entrar al Reino</button>
+            </form>
+
+            <form action="/crear-rey" method="POST">
+                <input type="text" name="usuario" placeholder="Nuevo Rey" required>
+                <button type="submit" class="btn-register">Fundar Reino</button>
+            </form>
+            
+            <a href="/generar-mapa">Reiniciar Continente (Admin)</a>
+        </div>
     </div>
 </body>
 </html>
