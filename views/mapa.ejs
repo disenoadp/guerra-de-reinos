@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Mapa del Continente</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .map-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .region { background: #2c3e50; padding: 15px; border-radius: 8px; border: 1px solid #f39c12; }
+        .region h3 { color: #f39c12; text-align: center; margin-bottom: 10px; }
+        .provincia { background: #34495e; margin-bottom: 10px; padding: 10px; border-radius: 4px; }
+        .territorio { background: #1a1a1a; padding: 8px; margin-top: 5px; display: flex; justify-content: space-between; font-size: 14px; }
+        .ocupado { color: #e74c3c; }
+        .vacio { color: #2ecc71; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2 class="section-title">Mapa de Aethel</h2>
+        <div class="map-grid">
+            <% for (let r = 1; r <= 3; r++) { %>
+                <div class="region">
+                    <h3>Región <%= r %></h3>
+                    <% for (let p = 1; p <= 3; p++) { %>
+                        <div class="provincia">
+                            <b>Provincia <%= p %></b>
+                            <% for (let t = 1; t <= 3; t++) { 
+                                let nombreT = 'R'+r+'-P'+p+'-T'+t;
+                                let dataT = territorios.find(x => x.nombre === nombreT);
+                            %>
+                                <div class="territorio">
+                                    <span>T<%= t %></span>
+                                    <% if (dataT && dataT.dueno) { %>
+                                        <span class="ocupado"><%= dataT.dueno %></span>
+                                    <% } else { %>
+                                        <span class="vacio">Vacío</span>
+                                    <% } %>
+                                </div>
+                            <% } %>
+                        </div>
+                    <% } %>
+                </div>
+            <% } %>
+        </div>
+        <br>
+        <a href="/panel/<%= jugador %>" class="btn">Volver al Panel</a>
+    </div>
+</body>
+</html>
