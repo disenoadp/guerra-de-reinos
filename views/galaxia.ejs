@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>OGame Clone - Galaxia</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div id="header">
+        <div class="time">Universo 1 - <%= new Date().toLocaleTimeString() %></div>
+        <div id="resources">
+            <div>Metal: <b><%= metal %></b></div>
+            <div>Cristal: <b><%= cristal %></b></div>
+            <div>Deuterio: <b><%= deuterio %></b></div>
+        </div>
+    </div>
+
+    <div id="content">
+        <div id="menu-left">
+            <a href="/panel/<%= jugador %>">Recursos</a>
+            <a href="/panel/<%= jugador %>/instalaciones">Instalaciones</a>
+            <a href="/panel/<%= jugador %>/hangar">Hangar</a>
+            <a href="/galaxia/<%= jugador %>" class="active">Galaxia</a>
+            <a href="/" style="margin-top: auto; color: #c0392b;">Cerrar Sesión</a>
+        </div>
+
+        <div id="main">
+            <div id="main-inner">
+                <h2 class="section-title">Galaxia</h2>
+                <table class="galaxy-table">
+                    <tr><th>Coordenadas</th><th>Jugador</th><th>Acción</th></tr>
+                    <% planetas.forEach(p => { %>
+                        <tr>
+                            <td><%= p.coords %></td>
+                            <td><%= p.jugador || 'Vacío' %></td>
+                            <td>
+                                <% if (p.coords !== tusCoords) { %>
+                                    <a href="/atacar/<%= jugador %>/<%= p.coords %>" class="btn-red" onclick="return confirm('Atacar?')">Atacar</a>
+                                <% } else { %>
+                                    <span style="color:#888;">Tu planeta</span>
+                                <% } %>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
