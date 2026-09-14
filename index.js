@@ -18,7 +18,6 @@ function toNum(val) {
     return typeof val === 'number' ? val : val.toNumber();
 }
 
-// Motor de OGame: Actualizar recursos perezosamente
 async function actualizarRecursos(session, jugador) {
     const ahora = Date.now();
     await session.run(`
@@ -30,7 +29,6 @@ async function actualizarRecursos(session, jugador) {
     `, { nombre: jugador, ahora });
 }
 
-// Motor de OGame: Resolver flotas que vuelven
 async function resolverFlotas(session, jugador) {
     const ahora = Date.now();
     const result = await session.run(`
@@ -96,20 +94,15 @@ app.get('/generar-universo', async (req, res) => {
     const session = driver.session();
     try {
         await session.run('MATCH (n) DETACH DELETE n');
-        // 9 Galaxias, 10 Sistemas, 5 Planetas = 450 planetas como en OGame
-        await session.run(`
-            UNWIND range(1, 9) AS g
-            UNWIND range(1, 10) AS s
-            UNWIND range(1, 5) AS p
-            MERGE (planet:Planeta {coords: g + ':' + s + ':' + p, ocupado: false, galaxia: g, sistema: s, posicion: p})
-        `);
+        await session.run(`UNWIND range(1, 9) AS g UNWIND range(1, 10) AS s UNWIND range(1, 5) AS p MERGE (planet:Planeta {coords: g + ':' + s + ':' + p, ocupado: false, galaxia: g, sistema: s, posicion: p})`);
         res.render('login', { error: null, success: 'Universo generado. 450 planetas creados.' });
     } catch (error) { res.status(500).send('Error'); } finally { await session.close(); }
 });
 
 // --- PANEL (DASHBOARD) ---
-app.get('/panel/:nombre', async (req, res) => {
+app.get('/panel/:nombre/:pagina?', async (req, res) => {
     const jugador = req.params.nombre;
+    const pagina = req.params.pagina || 'recursos';
     const session = driver.session();
     try {
         const ahora = Date.now();
@@ -132,11 +125,10 @@ app.get('/panel/:nombre', async (req, res) => {
         if (result.records.length === 0) return res.send('Jugador no encontrado.');
         const d = result.records[0];
         
-        // Calculamos el tiempo restante en el servidor (evita errores de EJS)
         const calcTiempo = (fin) => fin ? Math.max(0, Math.floor((toNum(fin) - ahora) / 1000)) : 0;
 
-        res.render('dashboard', {
-            jugador, coords: d.get('coords'),
+        res.render('panel', {
+            jugador, pagina, coords: d.get('coords'),
             metal: toNum(d.get('metal')), cristal: toNum(d.get('cristal')), deuterio: toNum(d.get('deuterio')),
             m_metal: toNum(d.get('m_metal')), m_cristal: toNum(d.get('m_cristal')), m_deut: toNum(d.get('m_deut')), m_hangar: toNum(d.get('m_hangar')),
             cazador: toNum(d.get('cazador')),
@@ -161,7 +153,7 @@ app.get('/construir/:nombre/:edificio', async (req, res) => {
         const costeM = Math.floor(60 * Math.pow(1.5, toNum(d.get('nivel'))));
         const costeC = Math.floor(15 * Math.pow(1.5, toNum(d.get('nivel'))));
         if (toNum(d.get('metal')) < costeM || toNum(d.get('cristal')) < costeC) return res.status(400).json({ error: 'Sin recursos.' });
-        const tiempoFin = Date.now() + (60 + (toNum(d.get('nivel')) * 60) * 1000); // 1 min por nivel
+        const tiempoFin = Date.now() + (60 + (toNum(d.get('nivel')) * 60) * 1000);
         await session.run(`MATCH (:Jugador {nombre: $nombre})-[:POSEE]->(p:Planeta) SET p.metal = toInteger(p.metal - $cM), p.cristal = toInteger(p.cristal - $cC), p.construccion_tipo = $e, p.construccion_fin = $t`, { nombre, cM: costeM, cC: costeC, e: edificio, t: tiempoFin });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: 'Error interno' }); } finally { await session.close(); }
@@ -178,7 +170,7 @@ app.get('/entrenar/:nombre/:nave', async (req, res) => {
         if (toNum(d.get('hangar')) === 0) return res.status(400).json({ error: 'Sin hangar.' });
         if (d.get('fin') !== null) return res.status(400).json({ error: 'Hangar ocupado.' });
         if (toNum(d.get('metal')) < 3000 || toNum(d.get('cristal')) < 1000) return res.status(400).json({ error: 'Sin recursos.' });
-        const tiempoFin = Date.now() + 30000; // 30 segundos
+        const tiempoFin = Date.now() + 30000;
         await session.run(`MATCH (:Jugador {nombre: $nombre})-[:POSEE]->(p:Planeta) SET p.metal = toInteger(p.metal - 3000), p.cristal = toInteger(p.cristal - 1000), p.entrenando_tipo = $n, p.entrenando_fin = $t`, { nombre, n: nave, t: tiempoFin });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: 'Error' }); } finally { await session.close(); }
@@ -189,13 +181,17 @@ app.get('/galaxia/:nombre', async (req, res) => {
     const nombre = req.params.nombre;
     const session = driver.session();
     try {
-        const result = await session.run(`MATCH (:Jugador {nombre: $nombre})-[:POSEE]->(o:Planeta), (d:Planeta) WHERE o.coords <> d.coords OPTIONAL MATCH (j:Jugador)-[:POSEE]->(d) RETURN d.coords AS c, j.nombre AS n, d.galaxia AS g, d.sistema AS s, d.posicion AS p ORDER BY g, s, p`);
-        let html = `<link rel="stylesheet" href="/css/style.css"><div class="container"><h2 class="section-title">Galaxia</h2><div class="card"><table style="width:100%; text-align:left;"><tr><th>Coordenadas</th><th>Jugador</th><th>Acción</th></tr>`;
-        result.records.forEach(r => {
-            html += `<tr><td>${r.get('c')}</td><td>${r.get('n') || 'Vacío'}</td><td><a href="/atacar/${nombre}/${r.get('c')}" class="btn btn-red" onclick="return confirm('Atacar?')">Atacar</a></td></tr>`;
+        const userData = await session.run(`MATCH (:Jugador {nombre: $nombre})-[:POSEE]->(p:Planeta) RETURN p.coords AS coords, p.metal AS metal, p.cristal AS cristal, p.deuterio AS deuterio`, { nombre });
+        if (userData.records.length === 0) return res.send('No encontrado');
+        const u = userData.records[0];
+
+        const result = await session.run(`MATCH (p:Planeta) OPTIONAL MATCH (j:Jugador)-[:POSEE]->(p) RETURN p.coords AS coords, j.nombre AS jugador ORDER BY p.galaxia, p.sistema, p.posicion`);
+        const planetas = result.records.map(r => ({ coords: r.get('coords'), jugador: r.get('jugador') }));
+
+        res.render('galaxia', {
+            jugador: nombre, planetas, tusCoords: u.get('coords'),
+            metal: toNum(u.get('metal')), cristal: toNum(u.get('cristal')), deuterio: toNum(u.get('deuterio'))
         });
-        html += `</table></div><br><a href="/panel/${nombre}" class="btn">Volver</a></div>`;
-        res.send(html);
     } catch (e) { res.status(500).send('Error'); } finally { await session.close(); }
 });
 
@@ -207,16 +203,15 @@ app.get('/atacar/:nombre/:destino', async (req, res) => {
         const result = await session.run(`MATCH (:Jugador {nombre: $nombre})-[:POSEE]->(o:Planeta), (d:Planeta {coords: $destino}) RETURN o.coords AS oc, o.naves_cazador AS t, o.ataque_fin AS fin, d.galaxia AS dg, d.sistema AS ds, d.posicion AS dp, o.galaxia AS og, o.sistema AS os, o.posicion AS op`, { nombre, destino });
         if (result.records.length === 0) return res.status(400).json({ error: 'Destino no encontrado.' });
         const d = result.records[0];
-        if (d.get('oc') === destino) return res.status(400).json({ error: 'No a tu propio planeta.' });
-        if (d.get('fin') !== null) return res.status(400).json({ error: 'Ya tienes flota en marcha.' });
-        if (toNum(d.get('t')) === 0) return res.status(400).json({ error: 'Sin naves.' });
+        if (d.get('oc') === destino) return res.redirect(`/panel/${nombre}`);
+        if (d.get('fin') !== null) return res.redirect(`/panel/${nombre}`);
+        if (toNum(d.get('t')) === 0) return res.redirect(`/panel/${nombre}`);
         
-        // Distancia simple (diferencia de sistemas * 10 segundos)
         const distancia = Math.abs(toNum(d.get('os')) - toNum(d.get('ds'))) || 1;
         const tiempoFin = Date.now() + (distancia * 10 * 1000);
         
         await session.run(`MATCH (:Jugador {nombre: $nombre})-[:POSEE]->(p:Planeta) SET p.naves_cazador = toInteger(p.naves_cazador - $t), p.ataque_destino = $d, p.ataque_fin = $f, p.ataque_tropas = $t`, { nombre, d: destino, f: tiempoFin, t: toNum(d.get('t')) });
-        res.redirect(`/panel/${nombre}`);
+        res.redirect(`/panel/${nombre}/flota`);
     } catch (e) { res.status(500).json({ error: 'Error' }); } finally { await session.close(); }
 });
 
