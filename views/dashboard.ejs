@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Universo - <%= jugador %></title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="topbar">
+        <h1>Planeta <%= coords %> (<%= jugador %>)</h1>
+        <div class="resources">
+            <div class="resource">Metal: <b><%= metal %></b></div>
+            <div class="resource">Cristal: <b><%= cristal %></b></div>
+            <div class="resource">Deuterio: <b><%= deuterio %></b></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="grid-2">
+            <div>
+                <h2 class="section-title">Construcciones</h2>
+                
+                <div class="card">
+                    <h3>Mina de Metal (Nivel <%= m_metal %>)</h3>
+                    <div class="card-row">
+                        <span>Prod: <%= m_metal * 30 %>/h<br><small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_metal)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_metal)) %> C</small></span>
+                        <% if (tiempo_construccion > 0 && tipo_construccion === 'mina_metal') { %>
+                            <span class="timer" data-time="<%= tiempo_construccion %>">Calculando...</span>
+                        <% } else if (tiempo_construamiento > 0) { %>
+                            <span class="timer">En cola...</span>
+                        <% } else { %>
+                            <button onclick="accion('construir', 'mina_metal')" class="btn">Mejorar</button>
+                        <% } %>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Mina de Cristal (Nivel <%= m_cristal %>)</h3>
+                    <div class="card-row">
+                        <span>Prod: <%= m_cristal * 20 %>/h<br><small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_cristal)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_cristal)) %> C</small></span>
+                        <% if (tiempo_construccion > 0 && tipo_construccion === 'mina_cristal') { %>
+                            <span class="timer" data-time="<%= tiempo_construccion %>">Calculando...</span>
+                        <% } else if (tiempo_construccion > 0) { %>
+                            <span class="timer">En cola...</span>
+                        <% } else { %>
+                            <button onclick="accion('construir', 'mina_cristal')" class="btn">Mejorar</button>
+                        <% } %>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Sintetizador de Deuterio (Nivel <%= m_deut %>)</h3>
+                    <div class="card-row">
+                        <span>Prod: <%= m_deut * 10 %>/h<br><small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_deut)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_deut)) %> C</small></span>
+                        <% if (tiempo_construccion > 0 && tipo_construccion === 'sintetizador') { %>
+                            <span class="timer" data-time="<%= tiempo_construccion %>">Calculando...</span>
+                        <% } else if (tiempo_construccion > 0) { %>
+                            <span class="timer">En cola...</span>
+                        <% } else { %>
+                            <button onclick="accion('construir', 'sintetizador')" class="btn">Mejorar</button>
+                        <% } %>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Hangar (Nivel <%= m_hangar %>)</h3>
+                    <div class="card-row">
+                        <span>Construcción de naves<br><small>Coste: <%= Math.floor(60 * Math.pow(1.5, m_hangar)) %> M, <%= Math.floor(15 * Math.pow(1.5, m_hangar)) %> C</small></span>
+                        <% if (tiempo_construccion > 0 && tipo_construccion === 'hangar') { %>
+                            <span class="timer" data-time="<%= tiempo_construccion %>">Calculando...</span>
+                        <% } else if (tiempo_construccion > 0) { %>
+                            <span class="timer">En cola...</span>
+                        <% } else { %>
+                            <button onclick="accion('construir', 'hangar')" class="btn">Mejorar</button>
+                        <% } %>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h2 class="section-title">Flota y Guerra</h2>
+                <div class="card">
+                    <h3>Hangar</h3>
+                    <div class="card-row">
+                        <span>Cazadores Ligeros: <%= cazador %><br><small>Coste: 3000 M, 1000 C</small></span>
+                        <% if (m_hangar > 0 && tiempo_entrenamiento === 0) { %>
+                            <button onclick="accion('entrenar', 'cazador')" class="btn">Construir</button>
+                        <% } else if (tiempo_entrenamiento > 0) { %>
+                            <span class="timer" data-time="<%= tiempo_entrenamiento %>">En hangar...</span>
+                        <% } else { %>
+                            <span style="color:#7f8c8d;">Requiere Hangar</span>
+                        <% } %>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Flota</h3>
+                    <% if (tiempo_ataque > 0) { %>
+                        <div class="card-row">
+                            <span>Atacando: <%= ataque_destino %></span>
+                            <span class="timer" data-time="<%= tiempo_ataque %>">En misión...</span>
+                        </div>
+                    <% } else if (cazador > 0) { %>
+                        <div class="card-row">
+                            <span>Tu flota está lista.</span>
+                            <a href="/galaxia/<%= jugador %>" class="btn">Ver Galaxia</a>
+                        </div>
+                    <% } else { %>
+                        <div class="card-row"><span>Sin flota disponible.</span></div>
+                    <% } %>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function accion(tipo, item) {
+            fetch(`/${tipo}/<%= jugador %>/${item}`).then(r => r.json()).then(d => { if(d.success) location.reload(); else alert(d.error); });
+        }
+
+        // Script de temporizador a prueba de fallos
+        document.querySelectorAll('.timer').forEach(el => {
+            let t = parseInt(el.getAttribute('data-time'));
+            setInterval(() => {
+                if (t <= 0) {
+                    el.innerHTML = '<b style="color:lightgreen;">¡Listo! <a href="/panel/<%= jugador %>" style="color:white;">Actualizar</a></b>';
+                } else {
+                    el.innerText = t + 's';
+                    t--;
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
