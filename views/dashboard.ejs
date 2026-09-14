@@ -17,16 +17,21 @@
     </div>
 
     <div class="container">
+        <div style="text-align:center; margin-bottom: 20px;">
+            <a href="/mapa" class="btn" style="background:#2980b9;">Ver Mapa del Continente</a>
+        </div>
+
         <div class="grid-2">
             <div>
                 <h2 class="section-title">Edificios</h2>
+                
                 <div class="card">
                     <h3>Mina de Hierro (Nivel <%= mina %>)</h3>
                     <div class="card-row">
-                        <span>Producción: <%= mina * 1000 %>/h</span>
-                        <% if (construccionFin) { %>
-                            <span class="timer">Mejorando... <span id="timer-mina">Calculando...</span></span>
-                        <% } else if (tipoConstruccion === 'mina-hierro') { %>
+                        <span>Prod: <%= mina * 1000 %>/h<br><small>Coste: <%= Math.floor(100 * Math.pow(1.5, mina)) %> H, <%= Math.floor(50 * Math.pow(1.5, mina)) %> M</small></span>
+                        <% if (construccionFin && tipoConstruccion === 'mina-hierro') { %>
+                            <span class="timer" id="timer-mina-hierro">Calculando...</span>
+                        <% } else if (construccionFin) { %>
                             <span class="timer">En cola...</span>
                         <% } else { %>
                             <button onclick="construir('mina-hierro')" class="btn">Mejorar</button>
@@ -37,9 +42,9 @@
                 <div class="card">
                     <h3>Aserradero (Nivel <%= aserradero %>)</h3>
                     <div class="card-row">
-                        <span>Producción: <%= aserradero * 800 %>/h</span>
+                        <span>Prod: <%= aserradero * 800 %>/h<br><small>Coste: <%= Math.floor(100 * Math.pow(1.5, aserradero)) %> H, <%= Math.floor(50 * Math.pow(1.5, aserradero)) %> M</small></span>
                         <% if (construccionFin && tipoConstruccion === 'aserradero') { %>
-                            <span class="timer">Mejorando...</span>
+                            <span class="timer" id="timer-aserradero">Calculando...</span>
                         <% } else if (construccionFin) { %>
                             <span class="timer">En cola...</span>
                         <% } else { %>
@@ -51,9 +56,9 @@
                 <div class="card">
                     <h3>Granja (Nivel <%= granja %>)</h3>
                     <div class="card-row">
-                        <span>Producción: <%= granja * 600 %>/h</span>
-                         <% if (construccionFin && tipoConstruccion === 'granja') { %>
-                            <span class="timer">Mejorando...</span>
+                        <span>Prod: <%= granja * 600 %>/h<br><small>Coste: <%= Math.floor(100 * Math.pow(1.5, granja)) %> H, <%= Math.floor(50 * Math.pow(1.5, granja)) %> M</small></span>
+                        <% if (construccionFin && tipoConstruccion === 'granja') { %>
+                            <span class="timer" id="timer-granja">Calculando...</span>
                         <% } else if (construccionFin) { %>
                             <span class="timer">En cola...</span>
                         <% } else { %>
@@ -65,9 +70,9 @@
                 <div class="card">
                     <h3>Cuartel (Nivel <%= cuartel %>)</h3>
                     <div class="card-row">
-                        <span>Entrenamiento de tropas</span>
-                         <% if (construccionFin && tipoConstruccion === 'cuartel') { %>
-                            <span class="timer">Mejorando...</span>
+                        <span>Entrenamiento<br><small>Coste: <%= Math.floor(100 * Math.pow(1.5, cuartel)) %> H, <%= Math.floor(50 * Math.pow(1.5, cuartel)) %> M</small></span>
+                        <% if (construccionFin && tipoConstruccion === 'cuartel') { %>
+                            <span class="timer" id="timer-cuartel">Calculando...</span>
                         <% } else if (construccionFin) { %>
                             <span class="timer">En cola...</span>
                         <% } else { %>
@@ -82,11 +87,13 @@
                 <div class="card">
                     <h3>Tropas</h3>
                     <div class="card-row">
-                        <span>Hostigadores: <%= tropas %></span>
+                        <span>Hostigadores: <%= tropas %><br><small>Coste: 50 H, 20 M, 10 O</small></span>
                         <% if (cuartel > 0 && !entrenandoFin) { %>
-                            <button onclick="entrenar('hostigador')" class="btn">Entrenar 1</button>
+                            <button onclick="entrenar('hostigador')" class="btn">Entrenar</button>
                         <% } else if (entrenandoFin) { %>
-                            <span class="timer">Entrenando...</span>
+                            <span class="timer" id="timer-tropa">Calculando...</span>
+                        <% } else { %>
+                            <span style="color:#7f8c8d;">Requiere Cuartel</span>
                         <% } %>
                     </div>
                 </div>
@@ -95,17 +102,17 @@
                     <h3>Sala de Guerra</h3>
                     <% if (ataqueFin) { %>
                         <div class="card-row">
-                            <span>Tropas en marcha hacia <%= ataqueDestino %></span>
-                            <span class="timer">Volviendo...</span>
+                            <span>Atacando: <%= ataqueDestino %></span>
+                            <span class="timer" id="timer-ataque">Calculando...</span>
                         </div>
                     <% } else if (tropas > 0) { %>
                         <div class="card-row">
-                            <span>Tus tropas están listas para la batalla.</span>
+                            <span>Tropas listas.</span>
                             <a href="/guerra/<%= jugador %>" class="btn">Ir a la Guerra</a>
                         </div>
                     <% } else { %>
                         <div class="card-row">
-                            <span>Necesitas tropas para ir a la guerra.</span>
+                            <span>Sin tropas.</span>
                         </div>
                     <% } %>
                 </div>
@@ -128,6 +135,33 @@
         function entrenar(tropa) {
             fetch('/entrenar/<%= jugador %>/' + tropa).then(r => r.json()).then(d => { if(d.success) location.reload(); else alert(d.error); });
         }
+
+        // SCRIPT PARA LOS TEMPORIZADORES
+        const ahoraServidor = <%= ahora %>;
+        function actualizarTimers() {
+            const timers = [
+                { id: 'timer-mina-hierro', fin: <%= construccionFin && tipoConstruccion === 'mina-hierro' ? construccionFin : 'null' %> },
+                { id: 'timer-aserradero', fin: <%= construccionFin && tipoConstruccion === 'aserradero' ? construccionFin : 'null' %> },
+                { id: 'timer-granja', fin: <%= construccionFin && tipoConstruccion === 'granja' ? construccionFin : 'null' %> },
+                { id: 'timer-cuartel', fin: <%= construccionFin && tipoConstruccion === 'cuartel' ? construccionFin : 'null' %> },
+                { id: 'timer-tropa', fin: <%= entrenandoFin ? entrenandoFin : 'null' %> },
+                { id: 'timer-ataque', fin: <%= ataqueFin ? ataqueFin : 'null' %> }
+            ];
+
+            timers.forEach(t => {
+                const el = document.getElementById(t.id);
+                if (el && t.fin) {
+                    let restante = Math.max(0, Math.floor((t.fin - ahoraServidor) / 1000));
+                    if (restante <= 0) {
+                        el.innerHTML = '<b style="color:lightgreen;">¡Listo! <a href="/panel/<%= jugador %>" style="color:white;">Actualizar</a></b>';
+                    } else {
+                        el.innerText = restante + 's';
+                    }
+                }
+            });
+        }
+        setInterval(actualizarTimers, 1000);
+        actualizarTimers();
     </script>
 </body>
 </html>
