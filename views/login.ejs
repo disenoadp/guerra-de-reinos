@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>OGame Clone - Acceso</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>OGame Clone</h1>
+            <% if (error) { %> <div class="error"><%= error %></div> <% } %>
+            <% if (success) { %> <div class="success"><%= success %></div> <% } %>
+
+            <form action="/entrar" method="POST">
+                <input type="text" name="usuario" placeholder="Nombre de Jugador" required>
+                <button type="submit" class="btn-login">Entrar al Universo</button>
+            </form>
+            <hr style="border-color: #7f8c8d; margin: 20px 0;">
+            <form action="/crear" method="POST">
+                <input type="text" name="usuario" placeholder="Nuevo Jugador" required>
+                <button type="submit" class="btn-register">Colonizar Planeta</button>
+            </form>
+            <a href="/generar-universo">Reiniciar Universo (Admin)</a>
+        </div>
+    </div>
+</body>
+</html>
